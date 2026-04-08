@@ -109,7 +109,7 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
 
   await userEvent.click(screen.getByText(/^Refinement$/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/Refinement workspace \/ Hedy AI/i)).toBeInTheDocument();
+  expect(screen.getByText(/Refinement workspace \/ meeting notes/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Upcoming sprint — RPAB Sprint 5/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Paste the refinement discussion for RPAB Sprint 5/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Refinement area/i).length).toBeGreaterThan(0);
@@ -120,27 +120,27 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
 
   await userEvent.click(screen.getByText(/Sprint planning/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/Sprint planning \/ Hedy AI/i)).toBeInTheDocument();
+  expect(screen.getByText(/Sprint planning \/ meeting notes/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Upcoming sprint — RPAB Sprint 5/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Paste the sprint planning discussion for RPAB Sprint 5/i)).toBeInTheDocument();
   expect(screen.getByText(/Sprint planning dashboard/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/Sprint review/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/Paste Hedy transcript or your sprint review notes/i)).toBeInTheDocument();
+  expect(screen.getByText(/Paste transcript or sprint review notes/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/RPA discovery call/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/Paste Hedy transcript or your discovery call notes/i)).toBeInTheDocument();
+  expect(screen.getByText(/Paste transcript or discovery call notes/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/Stakeholder update/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/Paste Hedy transcript or your stakeholder update notes/i)).toBeInTheDocument();
+  expect(screen.getByText(/Paste transcript or stakeholder update notes/i)).toBeInTheDocument();
 });
 
 test('planning Hedy updates replace the current planning snapshot instead of stacking duplicates', () => {
-  const policy = meetingMergePolicy('planning', 'Notes/Hedy');
-  const refinementPolicy = meetingMergePolicy('refinement', 'Notes/Hedy');
+  const policy = meetingMergePolicy('planning', 'Meeting notes');
+  const refinementPolicy = meetingMergePolicy('refinement', 'Meeting notes');
 
   expect(policy.overwriteFields).toEqual(
     expect.arrayContaining([
@@ -1037,7 +1037,7 @@ test('clear this tab removes only the current meeting data for the active sprint
           nextSteps: [],
           decisions: [],
           risks: [],
-          notes: ['Wrong Hedy note pasted here'],
+          notes: ['Wrong meeting note pasted here'],
           slides: [],
           completed: [],
           incomplete: [],
@@ -1064,14 +1064,14 @@ test('clear this tab removes only the current meeting data for the active sprint
   render(<App />);
 
   await userEvent.click(screen.getByText(/Retrospective/i));
-  expect(screen.getByText(/Wrong Hedy note pasted here/i)).toBeInTheDocument();
+  expect(screen.getByText(/Wrong meeting note pasted here/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: /Clear this tab/i }));
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
   expect(saved.meetingData['4_retro']).toBeUndefined();
   expect(saved.meetingData['4_standup']).toBeDefined();
-  expect(screen.queryByText(/Wrong Hedy note pasted here/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Wrong meeting note pasted here/i)).not.toBeInTheDocument();
 
   confirmSpy.mockRestore();
 });
@@ -1187,6 +1187,10 @@ test('project setup prompt is copyable and asks for a full adaptive project prof
   expect(prompt).toContain('"ticketsInProgress"');
   expect(prompt).toContain('Include every epic / workstream currently being worked on');
   expect(prompt).toContain('Include all current sprint user stories, tasks, bugs, spikes, and sub-tasks');
+  expect(prompt).toContain('Use current Jira / Confluence / project documentation / delivery notes');
+  expect(prompt).toContain('Include the current active sprint team');
+  expect(prompt).toContain('If team membership has changed, return the latest team only');
+  expect(prompt).toContain('Sprint cadence hint');
   expect(prompt).toContain('Current dashboard seed context');
   expect(prompt).toContain('Known workstreams in the dashboard');
   expect(prompt).toContain('Current sprint list in the dashboard');
@@ -1316,8 +1320,90 @@ test('applying project setup can switch the dashboard to a new project profile',
   expect(next.projectSetupAppliedAt).toBeTruthy();
 });
 
+
+
+test('reapplying project setup for the same project updates team membership without wiping saved sprint data', () => {
+  const prev = {
+    ...defaultState([{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true }]),
+    activeSprint: 4,
+    meetingData: {
+      '4_standup': {
+        summary: 'Existing standup summary',
+        notes: ['Keep this'],
+      },
+    },
+    sprintSummaries: { 4: { label: 'Sprint 4 archive' } },
+  };
+
+  const next = applyProjectSetupState(
+    prev,
+    {
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'UK Prospect Data Cleansing Automation',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        team: [
+          { name: 'Ali Khan', role: 'Senior Scrum Master' },
+          { name: 'New Joiner', role: 'Automation Developer' },
+        ],
+      },
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-27',
+        epicName: 'UK Prospect Data Cleansing Automation',
+      },
+      activeSprint: 4,
+      setupNotes: ['Team refreshed'],
+    },
+    [{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true }],
+  );
+
+  expect(next.projectProfile.team.map((person) => person.name)).toEqual(['Ali Khan', 'New Joiner']);
+  expect(next.meetingData['4_standup'].summary).toBe('Existing standup summary');
+  expect(next.sprintSummaries['4']).toEqual({ label: 'Sprint 4 archive' });
+  expect(next.projectSetupNotes).toEqual(['Team refreshed']);
+});
+
+test('project setup cadence auto-generates the next sprint when only the active sprint is provided', () => {
+  const next = applyProjectSetupState(
+    defaultState([{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14' }]),
+    {
+      projectProfile: {
+        dashboardTitle: 'ABC Delivery Hub',
+        projectLabel: 'ABC Programme',
+        projectKey: 'ABC',
+        projectName: 'Admissions Workflow Automation',
+        primaryEpic: 'ABC-12',
+        primaryEpicName: 'Admissions Workflow Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        sprintDurationDays: 10,
+        sprintGapDays: 4,
+      },
+      projectContext: {
+        projectKey: 'ABC',
+        epic: 'ABC-12',
+        epicName: 'Admissions Workflow Automation',
+      },
+      sprints: [
+        { num: 7, name: 'ABC Sprint 7', start: '2026-05-01', end: '2026-05-10', active: true },
+      ],
+      activeSprint: 7,
+    },
+    [{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14' }],
+  );
+
+  expect(next.projectProfile.sprintDurationDays).toBe(10);
+  expect(next.projectProfile.sprintGapDays).toBe(4);
+  expect(next.sprints.map((sprint) => sprint.num)).toEqual([7, 8]);
+  expect(next.sprints.find((sprint) => sprint.num === 8)).toMatchObject({
+    name: 'ABC Sprint 8',
+    start: '2026-05-15',
+    end: '2026-05-24',
+  });
+});
 test('standup Hedy merge policy protects Jira board-state fields', () => {
-  const policy = meetingMergePolicy('standup', 'Notes/Hedy');
+  const policy = meetingMergePolicy('standup', 'Meeting notes');
   expect(policy.allowMetrics).toBe(false);
   expect(policy.allowProjectContext).toBe(false);
   expect(policy.allowSummaryOverwrite).toBe(false);

@@ -1,6 +1,7 @@
 import {
   DEFAULT_PROJECT_PROFILE,
   deriveProjectContextFromProfile,
+  ensureUpcomingSprint,
   normaliseProjectProfile,
   normaliseSprints,
 } from './projectProfile';
@@ -398,8 +399,19 @@ export function getMeetingData(state, sprintNum, meetingId) {
 
 export function applyProjectSetupState(prevState, parsed, defaultSprints) {
   const current = hydrateState(prevState, defaultSprints);
-  const setupWorkstreams = (Array.isArray(parsed?.projectProfile?.workstreams) && parsed.projectProfile.workstreams.length)
-    ? parsed.projectProfile.workstreams
+  const currentProfile = normaliseProjectProfile(current.projectProfile, { useDefaults: false });
+  const parsedProfile = parsed?.projectProfile || {};
+  const cleanText = (value) => (value == null ? '' : String(value).trim());
+  const projectKeyHint = cleanText(parsedProfile?.projectKey || parsed?.projectContext?.projectKey);
+  const primaryEpicHint = cleanText(parsedProfile?.primaryEpic || parsed?.projectContext?.epic);
+  const projectNameHint = cleanText(parsedProfile?.projectName);
+  const projectChanged =
+    (projectKeyHint && projectKeyHint !== current.projectProfile?.projectKey) ||
+    (primaryEpicHint && primaryEpicHint !== current.projectProfile?.primaryEpic) ||
+    (projectNameHint && projectNameHint !== current.projectProfile?.projectName);
+
+  const setupWorkstreams = (Array.isArray(parsedProfile?.workstreams) && parsedProfile.workstreams.length)
+    ? parsedProfile.workstreams
     : (Array.isArray(parsed?.activeSprintBoard?.epicsInPlay)
       ? parsed.activeSprintBoard.epicsInPlay.map((item) => ({
           epic: item?.epic,
@@ -407,31 +419,46 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
           focus: item?.focus || item?.deliveryNote,
         }))
       : []);
+
+  const baseProfile = projectChanged ? {} : currentProfile;
   const incomingProfile = normaliseProjectProfile({
-    ...(parsed?.projectProfile || {}),
-    workstreams: setupWorkstreams,
-    projectKey: parsed?.projectProfile?.projectKey || parsed?.projectContext?.projectKey || current.projectProfile?.projectKey,
-    primaryEpic: parsed?.projectProfile?.primaryEpic || parsed?.projectContext?.epic || current.projectProfile?.primaryEpic,
-    primaryEpicName: parsed?.projectProfile?.primaryEpicName || parsed?.projectContext?.epicName || current.projectProfile?.primaryEpicName,
+    ...baseProfile,
+    ...parsedProfile,
+    workstreams: setupWorkstreams.length
+      ? setupWorkstreams
+      : (Array.isArray(parsedProfile?.workstreams) && parsedProfile.workstreams.length ? parsedProfile.workstreams : baseProfile.workstreams),
+    team: Array.isArray(parsedProfile?.team) && parsedProfile.team.length ? parsedProfile.team : baseProfile.team,
+    stakeholders: Array.isArray(parsedProfile?.stakeholders) && parsedProfile.stakeholders.length ? parsedProfile.stakeholders : baseProfile.stakeholders,
+    watchTickets: Array.isArray(parsedProfile?.watchTickets) && parsedProfile.watchTickets.length ? parsedProfile.watchTickets : baseProfile.watchTickets,
+    knownRisks: Array.isArray(parsedProfile?.knownRisks) && parsedProfile.knownRisks.length ? parsedProfile.knownRisks : baseProfile.knownRisks,
+    knownDecisions: Array.isArray(parsedProfile?.knownDecisions) && parsedProfile.knownDecisions.length ? parsedProfile.knownDecisions : baseProfile.knownDecisions,
+    projectKey: projectKeyHint || baseProfile.projectKey,
+    primaryEpic: primaryEpicHint || baseProfile.primaryEpic,
+    primaryEpicName: cleanText(parsedProfile?.primaryEpicName || parsed?.projectContext?.epicName) || baseProfile.primaryEpicName,
   }, { useDefaults: false });
+
   const incomingContext = {
     ...deriveProjectContextFromProfile(incomingProfile),
     ...(parsed?.projectContext || {}),
   };
+
   const incomingSprints = normaliseSprints(parsed?.sprints, incomingProfile);
-  const nextSprints = incomingSprints.length ? incomingSprints : current.sprints;
+  const fallbackSprints = projectChanged ? [] : current.sprints;
+  let nextSprints = incomingSprints.length ? incomingSprints : fallbackSprints;
   const incomingActiveSprint = Number(parsed?.activeSprint);
   const activeByFlag = nextSprints.find((sprint) => sprint.active)?.num;
-  const activeSprint =
+  const provisionalActiveSprint =
     (Number.isFinite(incomingActiveSprint) && nextSprints.find((sprint) => sprint.num === incomingActiveSprint)?.num) ||
     activeByFlag ||
     nextSprints?.[0]?.num ||
     current.activeSprint;
 
-  const projectChanged =
-    incomingProfile.projectKey !== current.projectProfile?.projectKey ||
-    incomingProfile.primaryEpic !== current.projectProfile?.primaryEpic ||
-    incomingProfile.projectName !== current.projectProfile?.projectName;
+  nextSprints = ensureUpcomingSprint(nextSprints, incomingProfile, provisionalActiveSprint);
+  const activeSprint =
+    nextSprints.find((sprint) => sprint.num === provisionalActiveSprint)?.num ||
+    nextSprints.find((sprint) => sprint.active)?.num ||
+    nextSprints?.[0]?.num ||
+    current.activeSprint;
 
   const appliedAt = new Date().toISOString();
   const nextMeetingData = projectChanged ? {} : { ...(current.meetingData || {}) };

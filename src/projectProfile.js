@@ -4,6 +4,12 @@ function textValue(value) {
   return text && text !== "null" ? text : "";
 }
 
+function cleanWholeNumber(value, fallback, min = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num < min) return fallback;
+  return num;
+}
+
 function cleanList(items) {
   return (Array.isArray(items) ? items : [])
     .map((item) => textValue(item))
@@ -29,6 +35,35 @@ function cleanWorkstreams(items) {
     .filter((item) => item.epic || item.epicName);
 }
 
+function parseIsoDate(value) {
+  const text = textValue(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const date = new Date(`${text}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatIsoDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function dayDiff(start, end) {
+  const startDate = parseIsoDate(start);
+  const endDate = parseIsoDate(end);
+  if (!startDate || !endDate) return null;
+  return Math.round((endDate.getTime() - startDate.getTime()) / 86400000);
+}
+
+function inclusiveDaySpan(start, end) {
+  const diff = dayDiff(start, end);
+  return diff == null ? null : diff + 1;
+}
+
+function sprintGapDaysBetween(previousEnd, nextStart) {
+  const diff = dayDiff(previousEnd, nextStart);
+  return diff == null ? null : Math.max(0, diff - 1);
+}
+
 export const DEFAULT_PROJECT_PROFILE = {
   dashboardTitle: "Scrum Intelligence",
   projectLabel: "UEL RPA Project",
@@ -42,6 +77,8 @@ export const DEFAULT_PROJECT_PROFILE = {
   scrumMasterName: "Ali Khan",
   scrumMasterRole: "Senior Scrum Master",
   sprintNameTemplate: "{projectKey} Sprint {num}",
+  sprintDurationDays: 14,
+  sprintGapDays: 1,
   reviewDeckReference: "RPA Sprint 2 Review - Recording Link included.pptx",
   reviewDeckGuidance: "Use the latest accepted stakeholder review deck as the locked format reference.",
   workstreams: [
@@ -112,6 +149,8 @@ export function normaliseProjectProfile(profile = {}, options = {}) {
     scrumMasterName: textValue(merged.scrumMasterName) || (useDefaults ? DEFAULT_PROJECT_PROFILE.scrumMasterName : ""),
     scrumMasterRole: textValue(merged.scrumMasterRole) || (useDefaults ? DEFAULT_PROJECT_PROFILE.scrumMasterRole : ""),
     sprintNameTemplate: textValue(merged.sprintNameTemplate) || (useDefaults ? DEFAULT_PROJECT_PROFILE.sprintNameTemplate : "{projectKey} Sprint {num}"),
+    sprintDurationDays: cleanWholeNumber(merged.sprintDurationDays, useDefaults ? DEFAULT_PROJECT_PROFILE.sprintDurationDays : null, 1),
+    sprintGapDays: cleanWholeNumber(merged.sprintGapDays, useDefaults ? DEFAULT_PROJECT_PROFILE.sprintGapDays : null, 0),
     reviewDeckReference: textValue(merged.reviewDeckReference) || (useDefaults ? DEFAULT_PROJECT_PROFILE.reviewDeckReference : ""),
     reviewDeckGuidance: textValue(merged.reviewDeckGuidance) || (useDefaults ? DEFAULT_PROJECT_PROFILE.reviewDeckGuidance : ""),
     workstreams: cleanWorkstreams(merged.workstreams),
@@ -169,6 +208,81 @@ export function normaliseSprints(sprints, profile) {
   return items.length ? items : [];
 }
 
+export function inferSprintCadence(profile, sprints = []) {
+  const safe = normaliseProjectProfile(profile);
+  const items = normaliseSprints(sprints, safe);
+  const latest = items[items.length - 1];
+  const explicitDuration = cleanWholeNumber(safe.sprintDurationDays, null, 1);
+  const explicitGap = cleanWholeNumber(safe.sprintGapDays, null, 0);
+  const derivedDuration = latest ? inclusiveDaySpan(latest.start, latest.end) : null;
+
+  let derivedGap = null;
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const gap = sprintGapDaysBetween(items[index - 1].end, items[index].start);
+    if (gap != null) {
+      derivedGap = gap;
+      break;
+    }
+  }
+
+  return {
+    durationDays: explicitDuration || derivedDuration || DEFAULT_PROJECT_PROFILE.sprintDurationDays,
+    gapDays: explicitGap ?? derivedGap ?? DEFAULT_PROJECT_PROFILE.sprintGapDays,
+  };
+}
+
+export function buildGeneratedSprint(profile, sprints = [], num, previousSprint = null) {
+  const safe = normaliseProjectProfile(profile);
+  const items = normaliseSprints(sprints, safe);
+  const base = previousSprint || items.find((item) => item.num === num - 1) || items[items.length - 1];
+  if (!base?.end) return null;
+
+  const { durationDays, gapDays } = inferSprintCadence(safe, items.length ? items : [base]);
+  const startDate = parseIsoDate(base.end);
+  if (!startDate) return null;
+  startDate.setUTCDate(startDate.getUTCDate() + gapDays + 1);
+  const endDate = new Date(startDate);
+  endDate.setUTCDate(endDate.getUTCDate() + durationDays - 1);
+
+  return {
+    num,
+    name: buildSprintName(safe, num),
+    start: formatIsoDate(startDate),
+    end: formatIsoDate(endDate),
+    active: false,
+  };
+}
+
+export function ensureUpcomingSprint(sprints = [], profile, activeSprintNum) {
+  const safe = normaliseProjectProfile(profile);
+  const items = normaliseSprints(sprints, safe);
+  if (!items.length) return items;
+
+  const activeNum = Number(activeSprintNum);
+  const activeSprint = items.find((item) => item.num === activeNum) || items.find((item) => item.active) || items[items.length - 1];
+  if (items.some((item) => item.num > activeSprint.num)) return items;
+
+  const generated = buildGeneratedSprint(safe, items, activeSprint.num + 1, activeSprint);
+  return generated ? [...items, generated] : items;
+}
+
+export function generateFutureSprints(sprints = [], profile, count = 6) {
+  const safe = normaliseProjectProfile(profile);
+  let items = normaliseSprints(sprints, safe);
+  if (!items.length || count <= 0) return items;
+
+  for (let index = 0; index < count; index += 1) {
+    const last = items[items.length - 1];
+    const nextNum = last.num + 1;
+    if (items.some((item) => item.num === nextNum)) continue;
+    const generated = buildGeneratedSprint(safe, items, nextNum, last);
+    if (!generated) break;
+    items = [...items, generated];
+  }
+
+  return items;
+}
+
 export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprints = []) {
   const safe = normaliseProjectProfile(profile);
   const sprintLines = normaliseSprints(sprints, safe)
@@ -177,7 +291,7 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     .join("\n");
 
   return [
-    `Use current Jira / project documentation / delivery notes to prepare a full first-time project setup pack for a Scrum dashboard.`,
+    `Use current Jira / Confluence / project documentation / delivery notes to prepare a full first-time project setup pack for a Scrum dashboard.`,
     `This setup must let the dashboard adapt to the current project with one response, so return only current confirmed project and sprint information.`,
     `Do not assume missing details. If a value is not known, use null or [] rather than guessing.`,
     ``,
@@ -196,6 +310,8 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `    "scrumMasterName": "name, or null",`,
     `    "scrumMasterRole": "role, or null",`,
     `    "sprintNameTemplate": "template like {projectKey} Sprint {num}, or null",`,
+    `    "sprintDurationDays": 14,`,
+    `    "sprintGapDays": 1,`,
     `    "reviewDeckReference": "locked sprint review deck reference if known, or null",`,
     `    "reviewDeckGuidance": "how the review deck should be treated, or null",`,
     `    "workstreams": [{ "epic": "EPIC-1", "epicName": "workstream / epic title", "focus": "one-line focus or null" }],`,
@@ -235,10 +351,13 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     ``,
     `Rules:`,
     `- Use the current project and current active sprint, not historical defaults.`,
-    `- Prefer confirmed Jira / project data over assumptions.`,
+    `- Prefer confirmed Jira / Confluence / project data over assumptions.`,
     `- Include the active sprint and the next few sprints if known.`,
+    `- Include sprint cadence when known: sprintDurationDays = inclusive sprint length, sprintGapDays = gap days between sprints.`,
     `- Include every epic / workstream currently being worked on in or materially affecting the active sprint.`,
     `- Include all current sprint user stories, tasks, bugs, spikes, and sub-tasks that matter for the board.`,
+    `- Include the current active sprint team from the scrum board / assignees when known, not only a generic team list.`,
+    `- If team membership has changed, return the latest team only so rerunning setup refreshes the team list cleanly.`,
     `- If a ticket is both in progress and currently blocked / flagged, include it in both "ticketsInProgress" and "ticketsBlocked", and also add blocker detail in "blockers".`,
     `- Only classify blocked when Jira currently shows Blocked or current impediment / flagged evidence exists.`,
     `- Keep team and stakeholder names/roles concise.`,
@@ -251,10 +370,13 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `Project name: ${safe.projectName}`,
     `Primary epic: ${safe.primaryEpic} — ${safe.primaryEpicName}`,
     `Sprint naming template hint: ${safe.sprintNameTemplate}`,
+    `Sprint cadence hint: ${safe.sprintDurationDays || "unknown"} day sprint${safe.sprintGapDays != null ? ` | ${safe.sprintGapDays} gap day${safe.sprintGapDays === 1 ? "" : "s"}` : ""}`,
     safe.workstreams.length
-      ? `Known workstreams in the dashboard:\n${safe.workstreams.map((item) => `- ${item.epic || "unknown"} | ${item.epicName || "untitled"}${item.focus ? ` | ${item.focus}` : ""}`).join("\n")}`
+      ? `Known workstreams in the dashboard:
+${safe.workstreams.map((item) => `- ${item.epic || "unknown"} | ${item.epicName || "untitled"}${item.focus ? ` | ${item.focus}` : ""}`).join("\n")}`
       : "",
-    sprintLines ? `Current sprint list in the dashboard:\n${sprintLines}` : "",
+    sprintLines ? `Current sprint list in the dashboard:
+${sprintLines}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -276,6 +398,8 @@ Schema:
     "scrumMasterName": "name or null",
     "scrumMasterRole": "role or null",
     "sprintNameTemplate": "template like {projectKey} Sprint {num} or null",
+    "sprintDurationDays": 14,
+    "sprintGapDays": 1,
     "reviewDeckReference": "locked review deck reference or null",
     "reviewDeckGuidance": "review deck handling guidance or null",
     "workstreams": [{ "epic": "EPIC-1", "epicName": "title", "focus": "one-line focus or null" }],
@@ -321,8 +445,11 @@ Rules:
 - If no sprint is marked active but activeSprint is clear from the notes, use it.
 - Team and stakeholder arrays should contain unique people only.
 - workstreams must cover all epics / workstreams currently in play.
+- Include sprint cadence when known: sprintDurationDays = inclusive sprint length, sprintGapDays = gap days between sprints.
+- Include the current active sprint team from the scrum board / assignees when known.
+- If team membership has changed, return the latest team list only.
 - watchTickets, knownRisks, knownDecisions, setupNotes, and notes must be concise and deduped.
 - Include the current active sprint board snapshot with all relevant epics, stories, tasks, bugs, spikes, and sub-tasks grouped by status.
 - If a ticket is both in progress and blocked right now, include it in both ticketsInProgress and ticketsBlocked and add the blocker detail.
 - Only classify blocked when the current Jira state or current impediment / flagged signal supports it.
-- Do not invent dates, Jira keys, assignees, or metrics.`;
+- Do not invent dates, Jira keys, assignees, metrics, or sprint cadence.`;

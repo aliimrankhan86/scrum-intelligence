@@ -54,7 +54,7 @@ function promptWorkstreams(projectProfile = PROJECT, projectContext) {
 
 const UPCOMING_SPRINT_INTELLIGENCE_PROMPT =
 `You extract sprint planning intelligence for Ali Khan, Senior Scrum Master on the current project.
-Input is sprint planning notes, refinement notes, or a Hedy transcript. Focus on what the team actually agreed or discovered for the next sprint named in the context.
+Input is sprint planning notes, refinement notes, or a meeting transcript from Hedy, Apple Notes, Teams, Notion, Granola, another meeting notes tool, or manual notes. Focus on what the team actually agreed or discovered for the next sprint named in the context.
 This is upcoming-sprint intelligence, so capture useful context Ali can revisit later when shaping, prioritising, or committing the sprint.
 
 Return ONLY this JSON — no explanation, no markdown:
@@ -94,8 +94,10 @@ export const MEETINGS = {
     useRovo: true,
     useNotes: true,
     rovoLabel: 'Before the meeting',
-    notesLabel: 'After the meeting — paste Hedy transcript or your notes',
-    notesPlaceholder: 'Paste Hedy transcript or your standup notes here...',
+    notesLabel: 'After the meeting — paste transcript or meeting notes',
+    notesPlaceholder: `Paste your standup transcript or meeting notes here...
+
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
     rovoPrompt: ({ projectContext, projectProfile, sprint, nextSprint }) => `Use the live Jira board for ${promptProjectKey(projectContext, projectProfile)} ${promptSprintName(sprint, projectProfile)} and reply in this exact format only. Do not add extra sections, commentary, markdown, or duplicates.
 Only include tickets that are in ${promptSprintName(sprint, projectProfile)} unless the section explicitly says Backlog.
@@ -211,7 +213,7 @@ Blocked logic:
 
     notesSystemPrompt:
 `You extract standup meeting context for Ali Khan, Senior Scrum Master on the current project.
-Input is a Hedy transcript or standup notes after the meeting.
+Input is a meeting transcript or standup notes after the meeting. The notes can come from Hedy, Apple Notes, Teams transcript, Notion, Granola, another meeting notes tool, or manual notes.
 
 Important:
 - Jira/Rovo remains the source of truth for board status, ticket counts, and blocked lists.
@@ -269,7 +271,7 @@ If someone confirms a blocker is removed, test data is shared, a meeting time ch
     useRovo: false,
     useNotes: true,
     rovoLabel: null,
-    notesLabel: 'Paste Hedy transcript or your refinement notes',
+    notesLabel: 'Paste transcript or refinement notes',
     notesPlaceholder: `Paste your refinement transcript or notes here.
 
 Useful content:
@@ -277,7 +279,9 @@ Useful content:
 - Carry-forward items and why they remain open
 - Discovery readiness and blocked access
 - Priority calls, decision gates, and rejected options
-- Actions Ali should chase before planning`,
+- Actions Ali should chase before planning
+
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
     rovoPrompt: null,
     systemPrompt: UPCOMING_SPRINT_INTELLIGENCE_PROMPT,
@@ -292,7 +296,7 @@ Useful content:
     useRovo: false,
     useNotes: true,
     rovoLabel: null,
-    notesLabel: 'Paste Hedy transcript or your sprint planning notes',
+    notesLabel: 'Paste transcript or sprint planning notes',
     notesPlaceholder: `Paste your sprint planning transcript or agreed notes here.
 
 Useful content:
@@ -300,7 +304,9 @@ Useful content:
 - What was selected for the next sprint
 - What was left out and why
 - Dependencies, risks, and team capacity
-- Actions and decisions made during planning`,
+- Actions and decisions made during planning
+
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
     rovoPrompt: null,
     systemPrompt: UPCOMING_SPRINT_INTELLIGENCE_PROMPT,
@@ -315,8 +321,8 @@ Useful content:
     useRovo: false,
     useNotes: true,
     rovoLabel: null,
-    notesLabel: 'Paste Hedy transcript or your sprint review notes',
-    notesPlaceholder: `Paste your sprint review notes or Hedy transcript here.
+    notesLabel: 'Paste transcript or sprint review notes',
+    notesPlaceholder: `Paste your sprint review transcript or notes here.
 
 Can include:
 - What was demoed and stakeholder reactions
@@ -325,11 +331,12 @@ Can include:
 - Actions agreed
 - Any feedback or new requests
 
-Plain notes, bullet points, or full transcript — all accepted.`,
+Plain notes, bullet points, or full transcript — all accepted.
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
     systemPrompt:
 `You extract sprint review intelligence for Ali Khan, Senior Scrum Master on the current project.
-Input is a Hedy transcript or sprint review notes — any format accepted.
+Input is a meeting transcript or sprint review notes — any format accepted. The notes can come from Hedy, Apple Notes, Teams transcript, Notion, Granola, another meeting notes tool, or manual notes.
 
 Return ONLY this JSON — no explanation, no markdown:
 {
@@ -356,19 +363,20 @@ Do not draft slide bullets, deck text, or presentation wording — this prompt i
     useRovo: false,
     useNotes: true,
     rovoLabel: null,
-    notesLabel: 'Paste Hedy transcript or your retro notes',
-    notesPlaceholder: `Paste your retrospective notes or Hedy transcript here.
+    notesLabel: 'Paste transcript or retro notes',
+    notesPlaceholder: `Paste your retrospective notes or transcript here.
 
 Can be bullet points like:
 WENT WELL: ...
 DIDN'T GO WELL: ...
 ACTIONS: ...
 
-Or just paste the transcript — any format works.`,
+Or just paste the transcript — any format works.
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
     systemPrompt:
 `You extract retrospective intelligence for Ali Khan, Senior Scrum Master on the current project.
-Input is retro notes or Hedy transcript — any format, bullet points or freeform.
+Input is retro notes or a meeting transcript — any format, bullet points or freeform. The notes can come from Hedy, Apple Notes, Teams transcript, Notion, Granola, another meeting notes tool, or manual notes.
 Keep everything simple and concise — no over-engineering.
 
 Return ONLY this JSON — no explanation, no markdown:
@@ -392,13 +400,15 @@ Actions must stay outcome-focused, not read like a long task list.`,
     useRovo: false,
     useNotes: true,
     rovoLabel: null,
-    notesLabel: 'Paste Hedy transcript or your discovery call notes',
-    notesPlaceholder: 'Paste your discovery call notes or Hedy transcript here...',
+    notesLabel: 'Paste transcript or discovery call notes',
+    notesPlaceholder: `Paste your discovery call notes or transcript here...
+
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
     rovoPrompt: null,
 
     systemPrompt:
 `You extract discovery call intelligence for Ali Khan, Senior Scrum Master on the current project.
-Input is a Hedy transcript or discovery call notes after the call.
+Input is a meeting transcript or discovery call notes after the call. The notes can come from Hedy, Apple Notes, Teams transcript, Notion, Granola, another meeting notes tool, or manual notes.
 
 Return ONLY this JSON — no explanation, no markdown:
 {
@@ -426,13 +436,15 @@ Actions must surface only the follow-ups Ali should actively chase or monitor.`,
     useRovo: false,
     useNotes: true,
     rovoLabel: null,
-    notesLabel: 'Paste Hedy transcript or your stakeholder update notes',
-    notesPlaceholder: 'Paste your stakeholder meeting notes or Hedy transcript here...',
+    notesLabel: 'Paste transcript or stakeholder update notes',
+    notesPlaceholder: `Paste your stakeholder meeting notes or transcript here...
+
+Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
     rovoPrompt: null,
 
     systemPrompt:
 `You extract stakeholder update intelligence for Ali Khan, Senior Scrum Master on the current project.
-Input is a Hedy transcript or stakeholder meeting notes.
+Input is a meeting transcript or stakeholder meeting notes. The notes can come from Hedy, Apple Notes, Teams transcript, Notion, Granola, another meeting notes tool, or manual notes.
 Keep language plain and non-technical — this is for business leadership.
 
 Return ONLY this JSON — no explanation, no markdown:

@@ -17,6 +17,7 @@ import {
   buildSprintName,
   DEFAULT_PROJECT_PROFILE,
   deriveProjectContextFromProfile,
+  generateFutureSprints,
   normaliseProjectProfile,
   PROJECT_SETUP_SYSTEM_PROMPT,
 } from "./projectProfile";
@@ -644,8 +645,9 @@ function sprintLabel(sprint) {
 }
 
 export function meetingMergePolicy(meetingId, source) {
-  const isStandupHedy = meetingId === "standup" && source === "Notes/Hedy";
-  const isPlanningHedy = isPlanningLikeView(meetingId) && source === "Notes/Hedy";
+  const isMeetingNotes = source === "Meeting notes" || source === "Notes/Hedy";
+  const isStandupHedy = meetingId === "standup" && isMeetingNotes;
+  const isPlanningHedy = isPlanningLikeView(meetingId) && isMeetingNotes;
   return {
     allowMetrics: !isStandupHedy,
     allowProjectContext: !isStandupHedy,
@@ -1645,7 +1647,7 @@ function RefinementWorkspaceCard({ targetSprintLabel, compact = false }) {
           marginTop: "6px",
         }}
       >
-        Paste Hedy refinement notes here to shape the upcoming sprint: scope candidates, carry-forward work, decision gates, dependencies, and what Ali needs to chase before commitment.
+        Paste refinement transcript or meeting notes here to shape the upcoming sprint: scope candidates, carry-forward work, decision gates, dependencies, and what Ali needs to chase before commitment.
       </div>
       <div
         style={{
@@ -3028,10 +3030,10 @@ export default function App() {
     : "Upcoming sprint — not yet set";
   const notesInputTitle =
     curMeeting === "refinement"
-      ? "Refinement workspace / Hedy AI"
+      ? "Refinement workspace / meeting notes"
       : isPlanningLikeView(curMeeting)
-        ? "Sprint planning / Hedy AI"
-        : "Notes / Hedy AI";
+        ? "Sprint planning / meeting notes"
+        : "Meeting notes / transcript";
   const notesInputSub =
     curMeeting === "refinement"
       ? `Paste the refinement discussion for ${nextSprint?.name || "the upcoming sprint"}`
@@ -3130,12 +3132,18 @@ export default function App() {
 
   const endSprint = useCallback((sprint) => {
     if (!sprint) return;
-    if (!window.confirm(`End Sprint ${sprint.num}? This will archive the sprint summary and move to the next sprint if one exists.`)) return;
+    if (!window.confirm(`End Sprint ${sprint.num}? This will archive the sprint summary and move to the next sprint.`)) return;
     let movedTo = null;
+    let movedToLabel = null;
     persist((prev) => {
-      const sorted = [...(prev.sprints || [])].sort((a, b) => a.num - b.num);
-      const nextSprint = sorted.find((item) => item.num > sprint.num) || null;
+      let sorted = [...(prev.sprints || [])].sort((a, b) => a.num - b.num);
+      let nextSprint = sorted.find((item) => item.num > sprint.num) || null;
+      if (!nextSprint) {
+        sorted = generateFutureSprints(sorted, prev.projectProfile, 1);
+        nextSprint = sorted.find((item) => item.num > sprint.num) || null;
+      }
       movedTo = nextSprint?.num || null;
+      movedToLabel = nextSprint?.name || null;
       return {
         sprintSummaries: {
           ...prev.sprintSummaries,
@@ -3146,12 +3154,13 @@ export default function App() {
             new Date().toLocaleDateString("en-GB"),
           ),
         },
+        sprints: sorted,
         activeSprint: nextSprint?.num || prev.activeSprint,
       };
     });
     showToast(
       movedTo
-        ? `Sprint ${sprint.num} archived. Switched to Sprint ${movedTo}.`
+        ? `Sprint ${sprint.num} archived. Switched to ${movedToLabel || `Sprint ${movedTo}`}.`
         : `Sprint ${sprint.num} archived.`,
     );
   }, [persist]);
@@ -3472,7 +3481,7 @@ export default function App() {
         );
         const summary = applyParsed(
           parsed,
-          tool === "rovo" ? "Rovo/Jira" : "Notes/Hedy",
+          tool === "rovo" ? "Rovo/Jira" : "Meeting notes",
         );
         tool === "rovo" ? setRovoPaste("") : setNotes("");
         const providerLabel =
@@ -4277,7 +4286,7 @@ export default function App() {
             Project setup
           </div>
           <div style={{ fontSize: "12px", color: C.text1, lineHeight: "1.65", marginBottom: "14px" }}>
-            Use one setup prompt to gather everything the board needs for first-time setup: project profile, active sprint, sprint dates, all epics in play, and the current stories/tasks grouped by status. Paste the Rovo response here and the dashboard will adapt itself.
+            Use one setup prompt to gather everything the board needs for first-time setup or a same-project refresh: project profile, sprint cadence, active sprint, upcoming sprints, all epics in play, the active sprint team, and the current stories/tasks grouped by status. Paste the Rovo response here and the dashboard will adapt itself.
           </div>
           <div
             style={{
@@ -4291,6 +4300,10 @@ export default function App() {
               `Current project: ${projectProfile.projectKey} — ${projectProfile.projectName}`,
               `Primary epic: ${projectContext.epic}${projectContext.epicName ? ` — ${projectContext.epicName}` : ""}`,
               `Sprint naming: ${projectProfile.sprintNameTemplate}`,
+              projectProfile.sprintDurationDays
+                ? `Sprint cadence: ${projectProfile.sprintDurationDays}-day sprint${projectProfile.sprintGapDays >= 0 ? ` · ${projectProfile.sprintGapDays} gap day${projectProfile.sprintGapDays === 1 ? "" : "s"}` : ""}`
+                : null,
+              projectProfile.team?.length ? `Team members known: ${projectProfile.team.length}` : null,
               projectProfile.workstreams?.length ? `Known workstreams: ${projectProfile.workstreams.length}` : null,
               state.projectSetupAppliedAt
                 ? `Last setup: ${new Date(state.projectSetupAppliedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}`
@@ -4336,7 +4349,7 @@ export default function App() {
                   Rovo project setup prompt
                 </div>
                 <div style={{ fontSize: "11px", color: C.text2 }}>
-                  One prompt to gather the full adaptive project profile and current sprint board in one response.
+                  One prompt to gather the adaptive project profile, sprint cadence, current scrum-board team, and active sprint board in one response.
                 </div>
               </div>
               <button
@@ -4402,7 +4415,7 @@ export default function App() {
             }}
           />
           <div style={{ fontSize: "11px", color: C.text2, marginTop: "6px", lineHeight: "1.5" }}>
-            Applying setup updates the project profile, sprint list, and active sprint board. Switching to a different project clears old meeting data, history, and insights while keeping API keys, theme, and Jira base URL.
+            Applying setup updates the project profile, sprint cadence, sprint list, current team, and active sprint board. Rerunning setup for the same project refreshes that context without wiping saved sprint data. Switching to a different project clears old meeting data, history, and insights while keeping API keys, theme, and Jira base URL.
           </div>
           {setupStatus && (
             <div
@@ -4707,8 +4720,8 @@ export default function App() {
             </div>
             {[
               ["s-num", "Sprint number", "number", "6"],
-              ["s-start", "Start (Wednesday)", "date", ""],
-              ["s-end", "End (Tuesday)", "date", ""],
+              ["s-start", "Start date", "date", ""],
+              ["s-end", "End date", "date", ""],
             ].map(([id, label, type, ph]) => (
               <div key={id} style={{ marginBottom: "8px" }}>
                 <label
@@ -4789,26 +4802,9 @@ export default function App() {
                 fontWeight: "600",
               }}
               onClick={() => {
-                persist((prev) => {
-                  const last = prev.sprints[prev.sprints.length - 1];
-                  let s = new Date(last.end + "T00:00:00");
-                  const next = [...prev.sprints];
-                  for (let i = 0; i < 6; i++) {
-                    s.setDate(s.getDate() + 2);
-                    const e = new Date(s);
-                    e.setDate(e.getDate() + 13);
-                    const num = last.num + i + 1;
-                    if (!next.find((sp) => sp.num === num))
-                      next.push({
-                        num,
-                        name: buildSprintName(projectProfile, num),
-                        start: s.toISOString().split("T")[0],
-                        end: e.toISOString().split("T")[0],
-                      });
-                    s = new Date(e);
-                  }
-                  return { sprints: next };
-                });
+                persist((prev) => ({
+                  sprints: generateFutureSprints(prev.sprints, prev.projectProfile, 6),
+                }));
               }}
             >
               Auto-generate next 6
