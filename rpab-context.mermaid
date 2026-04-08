@@ -1,0 +1,100 @@
+flowchart TD
+    subgraph ME["👤 Ali Khan — Senior Scrum Master, RPAB Project"]
+        ROLE["UEL · UK Prospect Data Cleansing Automation · Epic RPAB-27
+        Sprint cadence: 2 weeks · Current: Sprint 4 (ends 14 Apr 2026)
+        Stack: React app · Gemini primary → Groq fallback · localStorage state"]
+    end
+
+    subgraph INPUTS["Data Inputs"]
+        ROVO["🔵 Jira Rovo Chat
+        Structured board data
+        Tickets · Counts · Health"]
+        HEDY["🎙️ Hedy AI Recorder
+        Meeting transcripts
+        Verbal intel not in Jira"]
+        CONF["📄 Confluence
+        Retro board entries
+        Team async input"]
+    end
+
+    subgraph CEREMONIES["Ceremony Workflows"]
+
+        subgraph SD["📅 Daily Standup — PRIMARY USE"]
+            SD1["BEFORE: Run Rovo prompt → paste → Process
+            Loads: blockers+ticketID, stale-in-progress,
+            not-picked-up, counts, sprint health"]
+            SD2["DURING: Read dashboard top-down
+            Blockers → Stuck in progress →
+            Not started → Questions → Actions"]
+            SD3["AFTER: Paste Hedy transcript → Process
+            Adds: verbal actions, informal blockers,
+            team concerns not logged in Jira"]
+            SD1 --> SD2 --> SD3
+        end
+
+        subgraph RT["🔁 Retrospective"]
+            RT1["BEFORE meeting: paste Confluence
+            team entries → Process
+            Loads: went-well, didn't-go-well, actions"]
+            RT2["AFTER (optional): paste own notes
+            to capture discussion extras"]
+            RT1 --> RT2
+            RT_NOTE["⚠️ Skip Hedy here —
+            Confluence is richer source"]
+        end
+
+        subgraph DC["🔍 Discovery Call — Ali as Participant"]
+            DC1["AFTER call: paste Hedy transcript → Process
+            Extracts: open questions, scope boundaries,
+            unresolved decisions, stakeholder actions"]
+            DC_NOTE["⚠️ Skip Rovo — conversation
+            data more valuable than board"]
+        end
+
+        subgraph VI["📊 Velocity & Insights"]
+            VI1["ONCE per sprint (2-3 days before planning)
+            Run velocity Rovo prompt → paste → Process
+            Shows: avg points/sprint, avg tickets,
+            committed vs completed, 3 coaching insights"]
+            VI_NOTE["⚠️ No Hedy needed — pure Jira data"]
+        end
+
+    end
+
+    subgraph DASH["Dashboard Output — What You Act On"]
+        D1["🔴 Blockers — ticket ID + epic visible"]
+        D2["🟠 Stuck in progress — In Progress, no movement 3d+"]
+        D3["⚪ Not started — To Do / Backlog, nobody picked up"]
+        D4["🔵 Questions to ask in standup"]
+        D5["✅ Actions & owners with urgency"]
+        D6["📈 Sprint health · counts · velocity trend"]
+    end
+
+    subgraph API["API Chain"]
+        G["Gemini 1.5 Flash — primary
+        Free via AI Studio · test: process any paste"]
+        GR["Groq llama-3.1-8b-instant — fallback
+        Free tier · rate limited · auto-triggers if Gemini fails"]
+        G -->|"fails"| GR
+    end
+
+    ROVO -->|"paste into Rovo field"| SD1
+    ROVO -->|"paste into Rovo field"| VI1
+    HEDY -->|"paste into Notes field"| SD3
+    HEDY -->|"paste into Notes field"| DC1
+    CONF -->|"paste into Notes field"| RT1
+
+    SD3 --> D1 & D2 & D3 & D4 & D5 & D6
+    RT2 --> DASH
+    DC1 --> DASH
+    VI1 --> D6
+
+    DASH -->|"processed via"| API
+
+    subgraph RULES["Key Rules for Future Context"]
+        R1["staleInProgress = In Progress, no move 3d+"]
+        R2["notPickedUp = To Do/Backlog, never started"]
+        R3["Epic pill = violet · shows RPAB-XX parent epic"]
+        R4["Rovo first, Hedy second — they layer, not replace"]
+        R5["State per sprint+meeting key eg. 4_standup"]
+    end
