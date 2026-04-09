@@ -18,12 +18,13 @@ beforeEach(() => {
 
 test('renders the scrum-intelligence dashboard shell', () => {
   render(<App />);
-  expect(screen.getByText(/Scrum Intelligence/i)).toBeInTheDocument();
+  expect(screen.getByText(/^Scrum Intelligence$/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /API keys/i })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /Project setup/i })).toBeInTheDocument();
-  expect(screen.getByText(/Sprint detail/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Project setup$/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Sprint detail$/i })).toBeInTheDocument();
   expect(screen.getByText(/^Refinement$/i)).toBeInTheDocument();
-  expect(screen.queryByText(/Start Here/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/Start here/i)).toBeInTheDocument();
+  expect(screen.getByText(/What this product does and how to use it/i)).toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
   expect(screen.getByText(/^Groq 70B$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Cerebras Llama 3.1 8B$/i)).toBeInTheDocument();
@@ -76,7 +77,7 @@ test('migrates legacy rpab local storage into the scrum-intelligence store key',
 
   render(<App />);
 
-  expect(screen.getByText(/Scrum Intelligence/i)).toBeInTheDocument();
+  expect(screen.getByText(/^Scrum Intelligence$/i)).toBeInTheDocument();
   expect(window.localStorage.getItem('scrum_intelligence_v8')).toBeTruthy();
   expect(window.localStorage.getItem('rpab_v8')).toBeNull();
 });
@@ -127,7 +128,7 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
   expect(screen.getByPlaceholderText(/Paste meeting notes, transcript, or summary here/i)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Open input/i })).not.toBeInTheDocument();
 
-  await userEvent.click(screen.getByText(/Sprint detail/i));
+  await userEvent.click(screen.getByRole('button', { name: /^Sprint detail$/i }));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
   expect(screen.getByText(/single source reference/i)).toBeInTheDocument();
 
@@ -348,7 +349,7 @@ test('sprint reference rolls up summaries and key insight from other tabs', asyn
 
   render(<App />);
 
-  await userEvent.click(screen.getByText(/Sprint detail/i));
+  await userEvent.click(screen.getByRole('button', { name: /^Sprint detail$/i }));
 
   expect(screen.getByText(/single source reference/i)).toBeInTheDocument();
   expect(screen.getByText(/Meeting readouts/i)).toBeInTheDocument();

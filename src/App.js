@@ -3172,6 +3172,198 @@ function SummaryFilterCard({ label, value, hint, accent, onClick }) {
   );
 }
 
+function QuickStartGuide({
+  isReference,
+  isInsights,
+  workspaceAvailable,
+  meetingLabel,
+  captureSourceLabel,
+  onProjectSetup,
+  onOpenReference,
+}) {
+  const guideCard = (accent, title, text, actionLabel, onAction) => (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        minHeight: "100%",
+        padding: "18px",
+        borderRadius: "22px",
+        border: `1px solid ${alphaColor(accent, 0.18)}`,
+        background: C.bg2,
+        boxShadow: `0 18px 34px ${alphaColor("#0f172a", 0.06)}`,
+      }}
+    >
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "11px",
+          fontWeight: "800",
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          color: accent,
+        }}
+      >
+        <span
+          style={{
+            width: "9px",
+            height: "9px",
+            borderRadius: "999px",
+            background: accent,
+            boxShadow: `0 0 0 8px ${alphaColor(accent, 0.1)}`,
+            flexShrink: 0,
+          }}
+        />
+        {title}
+      </div>
+      <div style={{ fontSize: "13px", color: C.text1, lineHeight: 1.7 }}>
+        {text}
+      </div>
+      {actionLabel && onAction && (
+        <div style={{ marginTop: "auto" }}>
+          <ShellButton onClick={onAction} tone="subtle">
+            {actionLabel}
+          </ShellButton>
+        </div>
+      )}
+    </div>
+  );
+
+  const captureInstruction = isReference
+    ? "Use the ceremony tabs to capture fresh updates first, then come back here for the rolled-up sprint picture."
+    : workspaceAvailable
+      ? `Use Capture updates to paste ${captureSourceLabel.toLowerCase()}, then press Update to refresh the sections below.`
+      : "This view is mainly for review. Capture new updates from the ceremony tabs, then return here if you need the rolled-up sprint picture.";
+
+  const currentViewInstruction = isReference
+    ? "Sprint detail is the complete sprint view. It combines blockers, follow-ups, decisions, risks, warnings, and notes from the other tabs into one readable page."
+    : isInsights
+      ? "Velocity & insights shows sprint performance, coaching signals, and delivery trends. Use Sprint detail when you need blockers and follow-ups in one place."
+      : `${meetingLabel} focuses on the current ceremony. Capture the latest update here, then use Sprint detail if you want the whole sprint story in one place.`;
+
+  return (
+    <div
+      style={{
+        marginBottom: "18px",
+        padding: "20px",
+        borderRadius: "26px",
+        border: `1px solid ${C.bd}`,
+        background: C.panel2,
+        boxShadow: `0 24px 46px ${alphaColor("#0f172a", 0.07)}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "14px",
+          flexWrap: "wrap",
+          marginBottom: "16px",
+        }}
+      >
+        <div style={{ maxWidth: "820px" }}>
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: "800",
+              letterSpacing: ".12em",
+              textTransform: "uppercase",
+              color: C.text2,
+              marginBottom: "8px",
+            }}
+          >
+            Start here
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: C.text0, lineHeight: 1.2 }}>
+            What this product does and how to use it
+          </div>
+          <div style={{ fontSize: "14px", color: C.text1, lineHeight: 1.7, marginTop: "8px" }}>
+            Scrum Intelligence turns Jira Rovo output and meeting notes into a simple sprint dashboard with clear sections for blockers, follow-ups, decisions, warnings, and notes.
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "14px",
+        }}
+      >
+        {guideCard(
+          C.blue,
+          "1. Set up the project",
+          "Run Project setup first so the dashboard knows the project, active sprint, upcoming sprints, epic, and team context.",
+          "Open project setup",
+          onProjectSetup,
+        )}
+        {guideCard(
+          C.amber,
+          "2. Capture updates",
+          captureInstruction,
+          null,
+          null,
+        )}
+        {guideCard(
+          C.teal,
+          "3. Review the right view",
+          currentViewInstruction,
+          isReference ? null : "Open Sprint detail",
+          isReference ? null : onOpenReference,
+        )}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            padding: "18px",
+            borderRadius: "22px",
+            border: `1px solid ${C.bd}`,
+            background: C.bg2,
+            boxShadow: `0 18px 34px ${alphaColor("#0f172a", 0.06)}`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: "800",
+              letterSpacing: ".08em",
+              textTransform: "uppercase",
+              color: C.text2,
+            }}
+          >
+            Colour guide
+          </div>
+          {[
+            [C.red, "Red", "Blockers and critical issues"],
+            [C.amber, "Amber", "Warnings, risks, and watch-outs"],
+            [C.blue, "Blue", "Questions and follow-ups"],
+            [C.green, "Green", "Resolved items and positive status"],
+          ].map(([color, label, text]) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", color: C.text1 }}>
+              <span
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "999px",
+                  background: color,
+                  flexShrink: 0,
+                }}
+              />
+              <strong style={{ color: C.text0, fontWeight: "700" }}>{label}</strong>
+              <span>{text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RailNavItem({ label, color, active, onClick }) {
   return (
     <button
@@ -4174,6 +4366,16 @@ export default function App() {
                 {toast.msg}
               </div>
             )}
+
+            <QuickStartGuide
+              isReference={isReference}
+              isInsights={isInsights}
+              workspaceAvailable={workspaceAvailable}
+              meetingLabel={meeting.label}
+              captureSourceLabel={captureSourceLabel}
+              onProjectSetup={() => setModal("project-setup")}
+              onOpenReference={() => switchMeeting("reference")}
+            />
 
             <div className="app-filter-grid">
               <SummaryFilterCard
