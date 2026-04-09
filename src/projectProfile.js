@@ -298,7 +298,7 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `Return ONLY valid JSON in this exact shape:`,
     `{`,
     `  "projectProfile": {`,
-    `    "dashboardTitle": "short title for the app header, or null",`,
+    `    "dashboardTitle": "optional legacy field, set to Scrum Intelligence or null",`,
     `    "projectLabel": "short footer label, or null",`,
     `    "projectKey": "jira project key or null",`,
     `    "projectName": "project / initiative name or null",`,
@@ -386,7 +386,7 @@ Return ONLY valid JSON — no markdown, no commentary.
 Schema:
 {
   "projectProfile": {
-    "dashboardTitle": "short title or null",
+    "dashboardTitle": "optional legacy field, use Scrum Intelligence or null",
     "projectLabel": "short footer label or null",
     "projectKey": "jira project key or null",
     "projectName": "project / initiative name or null",

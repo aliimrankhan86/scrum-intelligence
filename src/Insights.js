@@ -179,6 +179,13 @@ export default function Insights({ state, persist, onAIStatusChange }) {
             .find((s) => s.num > state.activeSprint) || null,
         })
       : INSIGHTS_CONFIG.rovoPrompt;
+  const surfaceStyle = {
+    background: C.bg2,
+    border: `1px solid ${C.bd}`,
+    borderRadius: '24px',
+    padding: '18px',
+    boxShadow: '0 22px 42px rgba(15,23,42,0.08)',
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(insightRovoPrompt).then(() => {
@@ -189,7 +196,7 @@ export default function Insights({ state, persist, onAIStatusChange }) {
 
   const process = async () => {
     if (!paste.trim()) { setStatus('Paste Rovo response above first'); return; }
-    if (!state.groqKey && !state.cerebrasKey) { setStatus('No API key — click ⚙ API keys'); return; }
+    if (!state.groqKey && !state.cerebrasKey) { setStatus('No API key — click API keys'); return; }
     setLoading(true);
     setStatus('Processing...');
     try {
@@ -240,178 +247,189 @@ export default function Insights({ state, persist, onAIStatusChange }) {
   };
 
   return (
-    <div style={{ display:'grid', gridTemplateColumns:'360px 1fr', overflow:'hidden', height:'100%', minHeight:0 }}>
-
-      {/* Input */}
-      <div style={{ background:C.bg1, borderRight:`1px solid ${C.bd}`, overflowY:'auto', display:'flex', flexDirection:'column', minHeight:0 }}>
-        <div style={{ padding:'16px 18px 12px', borderBottom:`1px solid ${C.bd}`, position:'sticky', top:0, background:C.bg1, zIndex:5 }}>
-          <div style={{ fontSize:'16px', fontWeight:'600', borderLeft:'3px solid #8b5cf6', paddingLeft:'10px' }}>Velocity &amp; insights</div>
-        </div>
-        <div style={{ padding:'14px 18px', display:'flex', flexDirection:'column', gap:'14px' }}>
-
-          <div style={{ border:`1px solid ${C.bd2}`, borderRadius:'10px', overflow:'hidden', background:C.bg0 }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px', background:C.bg3 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                <div style={{ width:'26px', height:'26px', borderRadius:'6px', background:'#0052cc',
-                  display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'700', color:'#fff' }}>J</div>
-                <div>
-                  <div style={{ fontSize:'12px', fontWeight:'600', color:C.text0 }}>Jira Rovo Chat</div>
-                  <div style={{ fontSize:'11px', color:C.text2 }}>Get velocity data for last 3 sprints</div>
-                </div>
+    <div style={{ display:'flex', flexDirection:'column', gap:'18px' }}>
+      <div className="insights-panel-grid">
+        <div style={surfaceStyle}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', flexWrap:'wrap', marginBottom:'14px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+              <div style={{ width:'28px', height:'28px', borderRadius:'8px', background:'#0052cc',
+                display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'700', color:'#fff' }}>J</div>
+              <div>
+                <div style={{ fontSize:'13px', fontWeight:'700', color:C.text0 }}>Jira Rovo Chat</div>
+                <div style={{ fontSize:'11px', color:C.text2 }}>Get velocity data for the latest sprint run</div>
               </div>
+            </div>
+            <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
               <button onClick={handleCopy}
-                style={{ display:'flex', alignItems:'center', gap:'5px', padding:'6px 14px', borderRadius:'6px',
+                style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'8px 14px', borderRadius:'12px',
                   border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'700',
                   background: copied ? C.greenBg : '#0052cc', color: copied ? '#4ade80' : '#fff' }}>
-                {copied ? '✓ Copied' : '⎘ Copy prompt'}
-              </button>
-            </div>
-            <div style={{ height:'1px', background:C.bd }} />
-            <textarea
-              style={{ width:'100%', fontSize:'12px', padding:'10px 14px', border:'none', background:C.bg0,
-                color:C.text0, resize:'vertical', fontFamily:'inherit', lineHeight:'1.55', minHeight:'100px', outline:'none' }}
-              value={paste} onChange={e => setPaste(e.target.value)}
-              placeholder="Paste Rovo's velocity response here..." />
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 14px',
-              background:C.bg3, borderTop:`1px solid ${C.bd}`, gap:'8px' }}>
-              <span style={{ fontSize:'11px', color:C.text2, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {loading ? <span>Processing<Spinner /></span> : status || 'Paste Rovo response above'}
-              </span>
-              <button onClick={process} disabled={loading}
-                style={{ padding:'6px 16px', border:'none', borderRadius:'6px', cursor:'pointer',
-                  fontSize:'12px', fontWeight:'700', background:'#0052cc', color:'#fff', opacity: loading ? 0.5 : 1 }}>
-                Update
+                {copied ? '✓ Copied' : 'Copy Rovo Prompt'}
               </button>
             </div>
           </div>
 
-          {/* What this section is for */}
-          <div style={{ background:C.bg2, border:`1px solid ${C.bd}`, borderRadius:'8px', padding:'12px 14px' }}>
-            <div style={{ fontSize:'11px', fontWeight:'600', color:C.text1, marginBottom:'6px' }}>What this shows you</div>
-            <div style={{ fontSize:'11px', color:C.text2, lineHeight:'1.8' }}>
-              • Average story points the team completes per sprint<br />
-              • Average tickets completed per sprint<br />
-              • Current sprint committed vs completed so far<br />
-              • 3 coaching insights based on patterns<br />
-              • RPA project recommendation (if relevant)
-            </div>
+          <textarea
+            style={{ width:'100%', fontSize:'12px', padding:'12px 14px', border:`1px solid ${C.bd}`, borderRadius:'14px', background:C.bg0,
+              color:C.text0, resize:'vertical', fontFamily:'inherit', lineHeight:'1.6', minHeight:'130px', outline:'none' }}
+            value={paste} onChange={e => setPaste(e.target.value)}
+            placeholder="Paste the Rovo response here..." />
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:'12px', gap:'8px', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'11px', color:C.text2, flex:1 }}>
+              {loading ? <span>Processing<Spinner /></span> : status || 'Paste the Rovo response here, then update the dashboard.'}
+            </span>
+            <button onClick={process} disabled={loading}
+              style={{ padding:'8px 16px', border:'none', borderRadius:'12px', cursor:'pointer',
+                fontSize:'12px', fontWeight:'700', background:'#0052cc', color:'#fff', opacity: loading ? 0.5 : 1 }}>
+              Update
+            </button>
           </div>
         </div>
-      </div>
 
-      {/* Dashboard */}
-      <div style={{ overflowY:'auto', background:C.bg0, minHeight:0 }}>
-      <div style={{ padding:'14px 18px', display:'flex', flexDirection:'column', gap:'12px' }}>
-
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <span style={{ fontSize:'14px', fontWeight:'600' }}>Sprint velocity</span>
-          <span style={{ fontSize:'11px', color:C.text2 }}>Based on last 3 sprints</span>
-        </div>
-
-        {/* Averages */}
-        {(avgPoints || avgTickets) ? (
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-            <AvgCard
-              label="Avg story points / sprint"
-              value={avgPoints}
-              sub={<>avg completed · <Trend sprints={data.sprints||[]} field="completedPoints" /></>}
-              color="#a78bfa"
-            />
-            <AvgCard
-              label="Avg tickets / sprint"
-              value={avgTickets}
-              sub={<>avg completed · <Trend sprints={data.sprints||[]} field="completedTickets" /></>}
-              color="#67e8f9"
-            />
+        <div style={surfaceStyle}>
+          <div style={{ fontSize:'12px', fontWeight:'800', color:C.text2, letterSpacing:'.08em', textTransform:'uppercase', marginBottom:'10px' }}>
+            What this page shows
           </div>
-        ) : (
-          <div style={{ background:C.bg2, border:`1px solid ${C.bd}`, borderRadius:'10px', padding:'20px', textAlign:'center', color:C.text2, fontSize:'12px' }}>
-            Copy the Rovo prompt, paste the response, and click Update to see velocity data
+          <div style={{ fontSize:'22px', fontWeight:'800', color:C.text0, lineHeight:1.15, marginBottom:'10px' }}>
+            Sprint performance at a glance
           </div>
-        )}
-
-        {/* Current sprint commitment */}
-        {data.current && (
-          <div style={{ background:C.bg2, border:`1px solid rgba(217,119,6,0.3)`, borderRadius:'10px', padding:'14px' }}>
-            <div style={{ fontSize:'12px', fontWeight:'600', color:'#fb923c', marginBottom:'10px' }}>
-              {data.current.name} — current sprint commitment
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px' }}>
-              {[
-                ['Committed pts', data.current.committedPoints, C.text1],
-                ['Completed pts', data.current.completedPoints, data.current.completedPoints >= (data.current.committedPoints||0) ? '#4ade80' : '#fb923c'],
-                ['Committed tickets', data.current.committedTickets, C.text1],
-                ['Completed tickets', data.current.completedTickets, data.current.completedTickets >= (data.current.committedTickets||0) ? '#4ade80' : '#fb923c'],
-              ].map(([l,v,c]) => (
-                <div key={l} style={{ background:C.bg3, borderRadius:'6px', padding:'10px' }}>
-                  <div style={{ fontSize:'10px', color:C.text2, marginBottom:'4px' }}>{l}</div>
-                  <div style={{ fontSize:'18px', fontWeight:'700', color:c }}>{v ?? '—'}</div>
-                </div>
-              ))}
-            </div>
-            {/* Progress bar */}
-            {data.current.committedPoints && data.current.completedPoints != null && (
-              <div style={{ marginTop:'10px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
-                  <span style={{ fontSize:'11px', color:C.text2 }}>Sprint progress (story points)</span>
-                  <span style={{ fontSize:'11px', fontWeight:'600', color:'#fb923c' }}>
-                    {Math.round((data.current.completedPoints/data.current.committedPoints)*100)}%
-                  </span>
-                </div>
-                <div style={{ height:'8px', background:C.bg3, borderRadius:'4px', overflow:'hidden' }}>
-                  <div style={{
-                    width:`${Math.min(100, Math.round((data.current.completedPoints/data.current.committedPoints)*100))}%`,
-                    height:'100%', borderRadius:'4px', background:'#fb923c', transition:'width .4s ease'
-                  }} />
-                </div>
-              </div>
-            )}
+          <div style={{ fontSize:'13px', color:C.text1, lineHeight:'1.7' }}>
+            Track what the team usually finishes, how the current sprint is progressing, and what patterns need coaching attention before the next planning cycle.
           </div>
-        )}
-
-        {/* Sprint cards */}
-        {(data.sprints||[]).length > 0 && (
-          <>
-            <div style={{ fontSize:'12px', fontWeight:'600', color:C.text1, marginTop:'4px' }}>Sprint breakdown</div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'10px' }}>
-              {(data.sprints||[]).map(s => (
-                <SprintCard key={s.num} sprint={s} maxPoints={maxPoints} maxTickets={maxTickets} isCurrent={false} />
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Coaching insights */}
-        {(data.insights||[]).length > 0 && (
-          <div style={{ background:C.bg2, border:`1px solid rgba(139,92,246,0.3)`, borderRadius:'10px', overflow:'hidden' }}>
-            <div style={{ padding:'9px 14px', background:'rgba(139,92,246,0.08)', borderBottom:`1px solid rgba(139,92,246,0.2)`, display:'flex', alignItems:'center', gap:'8px' }}>
-              <span style={{ fontSize:'12px', fontWeight:'600', color:'#c4b5fd' }}>Coaching insights</span>
-              <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(139,92,246,0.2)', color:'#a78bfa' }}>
-                {data.insights.length} of 3
-              </span>
-            </div>
-            {data.insights.map((ins, i) => (
-              <div key={i} style={{ padding:'10px 14px', borderBottom: i < data.insights.length-1 ? `1px solid ${C.bd}` : 'none',
-                display:'flex', gap:'10px', alignItems:'flex-start' }}>
-                <span style={{ fontSize:'11px', fontWeight:'700', color:'#a78bfa', minWidth:'18px', marginTop:'1px' }}>{i+1}.</span>
-                <span style={{ fontSize:'12px', color:C.text0, lineHeight:'1.55' }}>{ins}</span>
+          <div style={{ display:'flex', flexDirection:'column', gap:'10px', marginTop:'16px' }}>
+            {[
+              'Average story points completed per sprint',
+              'Average tickets completed per sprint',
+              'Current sprint committed vs completed',
+              'Three coaching insights from recent delivery patterns',
+              'Optional RPA recommendation when the model surfaces one',
+            ].map((item) => (
+              <div key={item} style={{ display:'flex', alignItems:'flex-start', gap:'10px', color:C.text1, fontSize:'12px', lineHeight:'1.6' }}>
+                <span style={{ width:'8px', height:'8px', borderRadius:'50%', marginTop:'6px', background:C.blue, flexShrink:0 }} />
+                <span>{item}</span>
               </div>
             ))}
           </div>
-        )}
+        </div>
+      </div>
 
-        {/* RPA recommendation */}
-        {data.recommendation && (
-          <div style={{ background:C.bg2, border:`1px solid rgba(8,145,178,0.3)`, borderRadius:'10px', padding:'14px' }}>
-            <div style={{ fontSize:'11px', fontWeight:'700', color:'#67e8f9', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'6px' }}>
-              RPA project recommendation
+      {(avgPoints || avgTickets) ? (
+        <div className="insights-metric-grid">
+          <AvgCard
+            label="Avg story points / sprint"
+            value={avgPoints}
+            sub={<>avg completed <Trend sprints={data.sprints||[]} field="completedPoints" /></>}
+            color="#a78bfa"
+          />
+          <AvgCard
+            label="Avg tickets / sprint"
+            value={avgTickets}
+            sub={<>avg completed <Trend sprints={data.sprints||[]} field="completedTickets" /></>}
+            color="#67e8f9"
+          />
+          <div style={{ ...surfaceStyle, textAlign:'left' }}>
+            <div style={{ fontSize:'11px', fontWeight:'800', color:C.text2, textTransform:'uppercase', letterSpacing:'.08em', marginBottom:'8px' }}>
+              Performance window
             </div>
-            <div style={{ fontSize:'12px', color:C.text0, lineHeight:'1.6' }}>{data.recommendation}</div>
+            <div style={{ fontSize:'28px', fontWeight:'800', color:C.text0, marginBottom:'6px' }}>
+              {(data.sprints || []).length || 0}
+            </div>
+            <div style={{ fontSize:'12px', color:C.text1, lineHeight:'1.6' }}>
+              sprint{(data.sprints || []).length === 1 ? '' : 's'} in the current comparison set
+            </div>
           </div>
-        )}
+        </div>
+      ) : (
+        <div style={{ ...surfaceStyle, textAlign:'center', color:C.text2, fontSize:'12px' }}>
+          Copy the Rovo prompt, paste the response, and click Update to see velocity data.
+        </div>
+      )}
 
-      </div>
-      </div>
+      {data.current && (
+        <div style={{ ...surfaceStyle, border:`1px solid rgba(217,119,6,0.24)` }}>
+          <div style={{ fontSize:'12px', fontWeight:'800', color:C.text2, textTransform:'uppercase', letterSpacing:'.08em', marginBottom:'10px' }}>
+            Current sprint commitment
+          </div>
+          <div style={{ fontSize:'20px', fontWeight:'800', color:C.text0, marginBottom:'14px' }}>
+            {data.current.name}
+          </div>
+          <div className="insights-current-grid">
+            {[
+              ['Committed pts', data.current.committedPoints, C.text1],
+              ['Completed pts', data.current.completedPoints, data.current.completedPoints >= (data.current.committedPoints||0) ? '#4ade80' : '#fb923c'],
+              ['Committed tickets', data.current.committedTickets, C.text1],
+              ['Completed tickets', data.current.completedTickets, data.current.completedTickets >= (data.current.committedTickets||0) ? '#4ade80' : '#fb923c'],
+            ].map(([l,v,c]) => (
+              <div key={l} style={{ background:C.bg3, borderRadius:'14px', padding:'12px' }}>
+                <div style={{ fontSize:'10px', color:C.text2, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }}>{l}</div>
+                <div style={{ fontSize:'18px', fontWeight:'700', color:c }}>{v ?? '—'}</div>
+              </div>
+            ))}
+          </div>
+          {data.current.committedPoints && data.current.completedPoints != null && (
+            <div style={{ marginTop:'14px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px', gap:'10px', flexWrap:'wrap' }}>
+                <span style={{ fontSize:'11px', color:C.text2 }}>Sprint progress (story points)</span>
+                <span style={{ fontSize:'11px', fontWeight:'700', color:'#fb923c' }}>
+                  {Math.round((data.current.completedPoints/data.current.committedPoints)*100)}%
+                </span>
+              </div>
+              <div style={{ height:'10px', background:C.bg3, borderRadius:'999px', overflow:'hidden' }}>
+                <div style={{
+                  width:`${Math.min(100, Math.round((data.current.completedPoints/data.current.committedPoints)*100))}%`,
+                  height:'100%', borderRadius:'999px', background:'#fb923c', transition:'width .4s ease'
+                }} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(data.sprints||[]).length > 0 && (
+        <div style={surfaceStyle}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', flexWrap:'wrap', marginBottom:'14px' }}>
+            <div style={{ fontSize:'18px', fontWeight:'700', color:C.text0 }}>Sprint breakdown</div>
+            <div style={{ fontSize:'11px', color:C.text2 }}>Recent sprint run</div>
+          </div>
+          <div className="insights-sprint-grid">
+            {(data.sprints||[]).map(s => (
+              <SprintCard key={s.num} sprint={s} maxPoints={maxPoints} maxTickets={maxTickets} isCurrent={false} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {((data.insights||[]).length > 0 || data.recommendation) && (
+        <div className="insights-panel-grid">
+          {(data.insights||[]).length > 0 && (
+            <div style={{ ...surfaceStyle, overflow:'hidden' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px' }}>
+                <span style={{ fontSize:'12px', fontWeight:'700', color:'#a78bfa' }}>Coaching insights</span>
+                <span style={{ fontSize:'10px', padding:'3px 8px', borderRadius:'20px', background:'rgba(139,92,246,0.14)', color:'#a78bfa' }}>
+                  {data.insights.length}
+                </span>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                {data.insights.map((ins, i) => (
+                  <div key={i} style={{ display:'flex', gap:'10px', alignItems:'flex-start' }}>
+                    <span style={{ fontSize:'11px', fontWeight:'700', color:'#a78bfa', minWidth:'18px', marginTop:'1px' }}>{i+1}.</span>
+                    <span style={{ fontSize:'12px', color:C.text0, lineHeight:'1.65' }}>{ins}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.recommendation && (
+            <div style={{ ...surfaceStyle, border:`1px solid rgba(8,145,178,0.24)` }}>
+              <div style={{ fontSize:'11px', fontWeight:'800', color:'#67e8f9', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:'10px' }}>
+                RPA project recommendation
+              </div>
+              <div style={{ fontSize:'13px', color:C.text0, lineHeight:'1.7' }}>{data.recommendation}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

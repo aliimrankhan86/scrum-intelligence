@@ -21,7 +21,7 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.getByText(/Scrum Intelligence/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /API keys/i })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Project setup/i })).toBeInTheDocument();
-  expect(screen.getByText(/Sprint reference/i)).toBeInTheDocument();
+  expect(screen.getByText(/Sprint detail/i)).toBeInTheDocument();
   expect(screen.getByText(/^Refinement$/i)).toBeInTheDocument();
   expect(screen.queryByText(/Start Here/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
@@ -29,6 +29,26 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.getByText(/^Cerebras Llama 3.1 8B$/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Dark$/i })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Light$/i })).toBeInTheDocument();
+});
+
+test('uses page-level scrolling instead of a locked viewport shell', () => {
+  const { container } = render(<App />);
+  const fs = require('fs');
+  const path = require('path');
+  const appCss = fs.readFileSync(path.join(__dirname, 'App.css'), 'utf8');
+  const indexCss = fs.readFileSync(path.join(__dirname, 'index.css'), 'utf8');
+
+  const appFrame = container.querySelector('.app-frame');
+  const appMain = container.querySelector('.app-main');
+  const appMainScroll = container.querySelector('.app-main-scroll');
+
+  expect(appFrame).toBeTruthy();
+  expect(appMain).toBeTruthy();
+  expect(appMainScroll).toBeTruthy();
+  expect(appCss).not.toContain('max-height: calc(100vh - 36px);');
+  expect(appCss).toContain('overflow: visible;');
+  expect(appCss).not.toContain('overflow-y: auto;');
+  expect(indexCss).not.toContain('overflow: hidden;');
 });
 
 test('migrates legacy rpab local storage into the scrum-intelligence store key', () => {
@@ -86,7 +106,7 @@ test('copy prompt uses current sprint and epic context automatically', async () 
   render(<App />);
 
   await act(async () => {
-    await userEvent.click(screen.getByRole('button', { name: /Copy prompt/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Copy Rovo Prompt/i }));
   });
   expect(await screen.findByText(/Copied/i)).toBeInTheDocument();
 
@@ -102,8 +122,12 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
   render(<App />);
 
   expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Copy Rovo Prompt/i })).toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/Paste the Rovo response here/i)).toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/Paste meeting notes, transcript, or summary here/i)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Open input/i })).not.toBeInTheDocument();
 
-  await userEvent.click(screen.getByText(/Sprint reference/i));
+  await userEvent.click(screen.getByText(/Sprint detail/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
   expect(screen.getByText(/single source reference/i)).toBeInTheDocument();
 
@@ -274,7 +298,23 @@ test('sprint reference rolls up summaries and key insight from other tabs', asyn
       activeSprint: 4,
       meetingData: {
         '4_standup': {
+          ticketsBlocked: [{
+            ticket: 'RPAB-98',
+            summary: 'Jira integration path unresolved',
+            assignee: 'Nick Baumer',
+            epic: 'RPAB-27',
+            epicName: 'UK Prospect Data Cleansing Automation',
+          }],
+          blockers: [{
+            title: 'Jira integration path unresolved',
+            detail: 'CAB completion depends on the integration decision.',
+            ticketId: 'RPAB-98',
+            assignee: 'Nick Baumer',
+            epic: 'RPAB-27',
+            epicName: 'UK Prospect Data Cleansing Automation',
+          }],
           actions: [{ focus: 'Confirm Jira API delivery status', owner: 'Nick Baumer', why: 'Main sprint dependency', urgency: 'today' }],
+          nextSteps: [{ step: 'Confirm whether CAB can still hold the current date', owner: 'Ahmed Sheikh', timing: 'this week', why: 'Decision affects sprint commitment' }],
           decisions: [{ decision: 'Team to support UAT directly this week', madeBy: 'Team', impact: 'Keeps stakeholder testing moving' }],
           risks: [{ risk: 'Jira API delay could block completion', level: 'high', mitigation: 'Confirm delivery path today' }],
           notes: ['UAT test data has now been shared.'],
@@ -308,15 +348,19 @@ test('sprint reference rolls up summaries and key insight from other tabs', asyn
 
   render(<App />);
 
-  await userEvent.click(screen.getByText(/Sprint reference/i));
+  await userEvent.click(screen.getByText(/Sprint detail/i));
 
   expect(screen.getByText(/single source reference/i)).toBeInTheDocument();
   expect(screen.getByText(/Meeting readouts/i)).toBeInTheDocument();
+  expect(screen.getByText(/Blocked tickets/i)).toBeInTheDocument();
+  expect(screen.getByText(/Jira integration path unresolved/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Standup: sprint is still sensitive to Jira integration timing\./i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/Refinement: Sprint 5 needs CAB path clarity before commitment\./i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Actions for Ali across the sprint/i)).toBeInTheDocument();
   expect(screen.getByText(/Confirm Jira API delivery status/i)).toBeInTheDocument();
   expect(screen.getByText(/Coordinate CAB readiness with Callum/i)).toBeInTheDocument();
+  expect(screen.getByText(/Team next steps to watch/i)).toBeInTheDocument();
+  expect(screen.getByText(/Confirm whether CAB can still hold the current date/i)).toBeInTheDocument();
   expect(screen.getByText(/Cross-sprint notes and context/i)).toBeInTheDocument();
   expect(screen.getByText(/Refinement: Next sprint should trial task-based estimation\./i)).toBeInTheDocument();
 });

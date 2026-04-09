@@ -356,7 +356,7 @@ export function defaultState(defaultSprints) {
     meetingData: {},      // keyed by sprintNum_meetingId
     reviewPromptContext: {}, // keyed by sprintNum
     sprintSummaries: {},  // archived sprint data
-    theme: 'dark',
+    theme: 'light',
     projectProfile,
     projectContext,
     groqKey: '',

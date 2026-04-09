@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
+import "./App.css";
 import { MEETINGS, DEFAULT_SPRINTS } from "./config";
 import { callAI, buildContext, testProviders } from "./api";
 import {
@@ -28,6 +29,7 @@ const C = {
   bg1: "var(--app-bg1)",
   bg2: "var(--app-bg2)",
   bg3: "var(--app-bg3)",
+  panel2: "var(--app-panel2)",
   text0: "var(--app-text0)",
   text1: "var(--app-text1)",
   text2: "var(--app-text2)",
@@ -47,46 +49,48 @@ const C = {
 
 const THEME_VARS = {
   dark: {
-    "--app-bg0": "#0f1218",
-    "--app-bg1": "#141922",
-    "--app-bg2": "#181f2a",
-    "--app-bg3": "#212937",
-    "--app-text0": "#f2f5f8",
-    "--app-text1": "#b9c2cf",
-    "--app-text2": "#7e8898",
-    "--app-bd": "rgba(148,163,184,0.16)",
-    "--app-bd2": "rgba(148,163,184,0.28)",
-    "--app-blue": "#4f8cff",
-    "--app-blue-bg": "rgba(79,140,255,0.13)",
-    "--app-green": "#2fb36d",
-    "--app-green-bg": "rgba(47,179,109,0.13)",
-    "--app-amber": "#d89238",
-    "--app-amber-bg": "rgba(216,146,56,0.13)",
-    "--app-red": "#dd5c5c",
-    "--app-red-bg": "rgba(221,92,92,0.13)",
-    "--app-teal": "#1595a8",
-    "--app-teal-bg": "rgba(21,149,168,0.13)",
+    "--app-bg0": "#090d12",
+    "--app-bg1": "#121821",
+    "--app-bg2": "#171e29",
+    "--app-bg3": "#202938",
+    "--app-panel2": "rgba(23,30,41,0.88)",
+    "--app-text0": "#f5f7fb",
+    "--app-text1": "#c4ccd8",
+    "--app-text2": "#8d98aa",
+    "--app-bd": "rgba(148,163,184,0.14)",
+    "--app-bd2": "rgba(148,163,184,0.24)",
+    "--app-blue": "#5d86ff",
+    "--app-blue-bg": "rgba(93,134,255,0.14)",
+    "--app-green": "#35b87a",
+    "--app-green-bg": "rgba(53,184,122,0.14)",
+    "--app-amber": "#e4a142",
+    "--app-amber-bg": "rgba(228,161,66,0.14)",
+    "--app-red": "#f06f76",
+    "--app-red-bg": "rgba(240,111,118,0.14)",
+    "--app-teal": "#2eb7bb",
+    "--app-teal-bg": "rgba(46,183,187,0.14)",
   },
   light: {
-    "--app-bg0": "#f3f6fa",
-    "--app-bg1": "#fcfdff",
+    "--app-bg0": "#eff2f8",
+    "--app-bg1": "#f8f9fc",
     "--app-bg2": "#ffffff",
-    "--app-bg3": "#eef3f9",
+    "--app-bg3": "#eef2f8",
+    "--app-panel2": "rgba(255,255,255,0.78)",
     "--app-text0": "#111827",
-    "--app-text1": "#475569",
-    "--app-text2": "#64748b",
-    "--app-bd": "rgba(15,23,42,0.10)",
-    "--app-bd2": "rgba(15,23,42,0.16)",
-    "--app-blue": "#2563eb",
-    "--app-blue-bg": "rgba(37,99,235,0.08)",
-    "--app-green": "#15803d",
-    "--app-green-bg": "rgba(21,128,61,0.08)",
-    "--app-amber": "#c2710a",
-    "--app-amber-bg": "rgba(194,113,10,0.08)",
-    "--app-red": "#dc2626",
-    "--app-red-bg": "rgba(220,38,38,0.08)",
-    "--app-teal": "#0f766e",
-    "--app-teal-bg": "rgba(15,118,110,0.08)",
+    "--app-text1": "#5f6c84",
+    "--app-text2": "#96a1b2",
+    "--app-bd": "rgba(15,23,42,0.07)",
+    "--app-bd2": "rgba(15,23,42,0.12)",
+    "--app-blue": "#3f6df6",
+    "--app-blue-bg": "rgba(63,109,246,0.12)",
+    "--app-green": "#2fbf7b",
+    "--app-green-bg": "rgba(47,191,123,0.12)",
+    "--app-amber": "#e49a3a",
+    "--app-amber-bg": "rgba(228,154,58,0.12)",
+    "--app-red": "#ef6b73",
+    "--app-red-bg": "rgba(239,107,115,0.12)",
+    "--app-teal": "#2eb7bb",
+    "--app-teal-bg": "rgba(46,183,187,0.12)",
   },
 };
 
@@ -118,7 +122,7 @@ const DEFAULT_PROJECT_CONTEXT = deriveProjectContextFromProfile(DEFAULT_PROJECT_
 const SPECIAL_VIEWS = {
   reference: {
     id: "reference",
-    label: "Sprint reference",
+    label: "Sprint detail",
     color: "#0f766e",
     useRovo: false,
     useNotes: false,
@@ -746,6 +750,19 @@ function buildSprintReferenceData(state, sprintNum) {
   const meetings = sprintMeetingEntries(state, sprintNum);
   const addSourceDetail = (detail, sourceLabel) =>
     firstValue(detail, `Captured in ${sourceLabel}.`);
+  const blockers = dedupeItems(
+    meetings.flatMap(({ label, data }) =>
+      buildBlockedItems(data).map((item) => ({
+        ...item,
+        reason: addSourceDetail(item.reason, label),
+      })),
+    ),
+    (item) => [
+      textValue(item.ticketId),
+      textValue(item.summary || item.blockerTitle),
+      textValue(item.reason),
+    ].join("|"),
+  );
   const questions = dedupeItems(
     meetings.flatMap(({ label, data }) =>
       (data.questions || []).map((item) => ({
@@ -763,6 +780,15 @@ function buildSprintReferenceData(state, sprintNum) {
       })),
     ),
     actionSignature,
+  );
+  const nextSteps = dedupeItems(
+    meetings.flatMap(({ label, data }) =>
+      (data.nextSteps || []).map((item) => ({
+        ...item,
+        detail: addSourceDetail(item.detail, label),
+      })),
+    ),
+    nextStepSignature,
   );
   const decisions = dedupeItems(
     meetings.flatMap(({ label, data }) =>
@@ -794,8 +820,24 @@ function buildSprintReferenceData(state, sprintNum) {
 
   return {
     meetings,
+    ticketsBlocked: blockers.map((item) => ({
+      ticket: item.ticketId,
+      summary: item.summary || item.blockerTitle,
+      assignee: item.assignee,
+      epic: item.epic,
+      epicName: item.epicName,
+    })),
+    blockers: blockers.map((item) => ({
+      ticketId: item.ticketId,
+      title: item.blockerTitle || item.summary,
+      detail: item.reason,
+      assignee: item.assignee,
+      epic: item.epic,
+      epicName: item.epicName,
+    })),
     questions,
     actions,
+    nextSteps,
     decisions,
     risks,
     notes,
@@ -837,13 +879,13 @@ function ProviderStatusChip({ name, info }) {
         alignItems: "center",
         gap: "8px",
         fontSize: "12px",
-        padding: "7px 12px",
+        padding: "9px 14px",
         borderRadius: "999px",
         border: `1px solid ${style.border}`,
         background: style.bg,
         color: style.color,
         whiteSpace: "nowrap",
-        boxShadow: `inset 0 1px 0 ${alphaColor("#ffffff", 0.03)}`,
+        boxShadow: `0 8px 18px ${alphaColor("#0f172a", 0.04)}`,
       }}
       >
         <span
@@ -936,11 +978,10 @@ function Sec({ title, count, children, action, accent, emptyLabel, warnBg }) {
     <div
       style={{
         background: C.bg2,
-        border: `1px solid ${accent && hasItems ? alphaColor(accent, 0.42) : C.bd}`,
-        borderLeft: `4px solid ${accent && hasItems ? accent : "transparent"}`,
-        borderRadius: "14px",
+        border: `1px solid ${accent && hasItems ? alphaColor(accent, 0.26) : C.bd}`,
+        borderRadius: "22px",
         overflow: "hidden",
-        boxShadow: `0 1px 0 ${alphaColor("#ffffff", 0.02)}`,
+        boxShadow: `0 14px 30px ${alphaColor("#0f172a", 0.05)}`,
       }}
     >
       <div
@@ -948,8 +989,8 @@ function Sec({ title, count, children, action, accent, emptyLabel, warnBg }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "12px 16px",
-          background: C.bg3,
+          padding: "15px 18px",
+          background: C.bg2,
           borderBottom: `1px solid ${C.bd}`,
         }}
       >
@@ -1001,12 +1042,12 @@ function Row({ isNew, left, main, sub, accentColor }) {
   return (
     <div
       style={{
-        padding: "14px 16px",
+        padding: "16px 18px",
         borderBottom: `1px solid ${C.bd}`,
         display: "flex",
-        gap: "12px",
+        gap: "14px",
         alignItems: "flex-start",
-        background: isNew ? C.bg3 : "transparent",
+        background: isNew ? alphaColor(accentColor || C.blue, 0.06) : "transparent",
         borderLeft: `4px solid ${accentColor || (isNew ? C.blue : "transparent")}`,
       }}
     >
@@ -1062,7 +1103,7 @@ function QSec({ data, fresh, label }) {
     questionSignature,
   );
   return (
-    <Sec title={label || "Questions to ask"} count={items.length} emptyLabel="✓ No open questions to raise">
+    <Sec title={label || "Questions to ask"} count={items.length} accent={C.blue} emptyLabel="✓ No open questions to raise">
       {items.map((q, i) => (
         <Row
           key={i}
@@ -1544,7 +1585,7 @@ function NextStepsSec({ data, fresh }) {
 function DecisionsSec({ data, fresh }) {
   const items = dedupeItems(data.decisions || [], decisionSignature);
   return (
-    <Sec title="Decisions made" count={items.length}>
+    <Sec title="Decisions made" count={items.length} accent={C.teal}>
       {items.map((d, i) => (
         <Row
           key={i}
@@ -1572,8 +1613,11 @@ function DecisionsSec({ data, fresh }) {
 
 function RisksSec({ data, fresh }) {
   const items = dedupeItems(data.risks || [], riskSignature);
+  const hasHigh = items.some((r) => r.level === "high");
+  const hasMedium = items.some((r) => r.level === "medium");
+  const accent = hasHigh ? C.red : hasMedium ? C.amber : items.length ? C.green : undefined;
   return (
-    <Sec title="Risks" count={items.length}>
+    <Sec title="Risks" count={items.length} accent={accent} warnBg={hasHigh || hasMedium}>
       {items.map((r, i) => (
         <Row
           key={i}
@@ -1652,7 +1696,7 @@ function RefinementWorkspaceCard({ targetSprintLabel, compact = false }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: compact ? "repeat(3,minmax(0,1fr))" : "repeat(3,minmax(0,1fr))",
+          gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
           gap: "10px",
           marginTop: "14px",
         }}
@@ -1887,23 +1931,29 @@ function FilterMetricCard({
 }) {
   const isActive = activeFilters.includes(filterKey);
   const activate = () => interactive && onFilter(filterKey);
-  const activeBg = subtleSectionSurface(color, 0.14);
+  const solidActiveBg = isActive
+    ? `linear-gradient(180deg, ${alphaColor(color, 0.94)}, ${alphaColor(color, 0.78)})`
+    : C.bg2;
   const baseBorder = warnBorder && (value ?? 0) > 0 ? alphaColor(C.red, 0.45) : C.bd;
-  const readableActiveText = isActive ? C.text0 : color;
+  const activeText = "#ffffff";
   return (
     <div
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
       aria-pressed={interactive ? isActive : undefined}
       style={{
-        background: isActive ? activeBg : C.bg2,
-        border: `1px solid ${isActive ? alphaColor(color, 0.55) : baseBorder}`,
-        borderRadius: "14px",
-        padding: "14px 14px 12px",
+        background: solidActiveBg,
+        border: `1px solid ${isActive ? alphaColor(color, 0.95) : baseBorder}`,
+        borderRadius: "16px",
+        padding: "18px 18px 16px",
         cursor: interactive ? "pointer" : "default",
-        boxShadow: isActive ? `inset 0 -3px 0 ${color}` : "none",
-        transition: "border-color .2s, background .2s, box-shadow .2s",
+        boxShadow: isActive
+          ? `0 12px 24px ${alphaColor(color, 0.24)}, inset 0 -4px 0 ${alphaColor("#000000", 0.16)}`
+          : `inset 0 -1px 0 ${alphaColor("#ffffff", 0.02)}`,
+        transition: "border-color .2s, background .2s, box-shadow .2s, transform .2s",
         userSelect: "none",
+        minHeight: "124px",
+        transform: isActive ? "translateY(-1px)" : "none",
       }}
       onClick={activate}
       onKeyDown={(e) => {
@@ -1916,17 +1966,25 @@ function FilterMetricCard({
     >
       <div
         style={{
-          fontSize: "11px",
-          color: isActive ? C.text0 : C.text2,
-          fontWeight: "700",
+          fontSize: "15px",
+          color: isActive ? alphaColor(activeText, 0.94) : C.text2,
+          fontWeight: 900,
           textTransform: "uppercase",
           letterSpacing: ".08em",
-          marginBottom: "8px",
+          marginBottom: "12px",
         }}
       >
         {label}
       </div>
-      <div style={{ fontSize: "28px", fontWeight: "800", color: isActive ? readableActiveText : color }}>
+      <div
+        style={{
+          fontSize: "44px",
+          lineHeight: 1,
+          fontWeight: 900,
+          color: isActive ? activeText : color,
+          letterSpacing: "-0.03em",
+        }}
+      >
         {value ?? "—"}
       </div>
     </div>
@@ -2036,8 +2094,8 @@ function StandupDash({ data, fresh, sprint, jiraBase }) {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(6,1fr)",
-              gap: "8px",
+              gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))",
+              gap: "10px",
             }}
           >
             <FilterMetricCard label="Done"        value={m.done}     color="#4ade80" filterKey="done"     activeFilters={activeFilters} onFilter={handleFilter} />
@@ -2397,7 +2455,7 @@ function SprintReferenceDash({ state, sprint }) {
           {sprint?.name || "Current sprint"}
         </div>
         <div style={{ fontSize: "14px", color: C.text1, lineHeight: 1.6, marginTop: "6px" }}>
-          One dashboard for the active sprint: meeting summaries, actions, decisions, risks, and useful notes rolled up from the other tabs.
+          This is the full sprint-detail view: blockers, follow-ups, next steps, decisions, risks, and useful notes rolled up from the other tabs.
         </div>
         <div
           style={{
@@ -2450,8 +2508,10 @@ function SprintReferenceDash({ state, sprint }) {
         ))}
       </Sec>
 
+      <BlockersSec data={reference} fresh={{}} />
       <QSec data={reference} fresh={{}} label="Questions to resolve across the sprint" />
       <ActionsSec data={reference} fresh={{}} label="Actions for Ali across the sprint" />
+      <NextStepsSec data={reference} fresh={{}} />
       <DecisionsSec data={reference} fresh={{}} />
       <RisksSec data={reference} fresh={{}} />
       <NotesSec data={reference} fresh={{}} label="Cross-sprint notes and context" />
@@ -2768,8 +2828,10 @@ function InputBlock({
   title,
   sub,
   copyText,
+  copyLabel,
   paste,
   onPaste,
+  pastePlaceholder,
   status,
   loading,
   onProcess,
@@ -2786,10 +2848,11 @@ function InputBlock({
   return (
     <div
       style={{
-        border: `1px solid ${C.bd2}`,
-        borderRadius: "10px",
+        border: `1px solid ${C.bd}`,
+        borderRadius: "22px",
         overflow: "hidden",
-        background: C.bg0,
+        background: C.bg2,
+        boxShadow: `0 14px 30px ${alphaColor("#0f172a", 0.05)}`,
       }}
     >
       <div
@@ -2797,8 +2860,10 @@ function InputBlock({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "10px 14px",
-          background: C.bg3,
+          padding: "14px 16px",
+          background: C.bg2,
+          gap: "10px",
+          flexWrap: "wrap",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -2827,48 +2892,51 @@ function InputBlock({
             <div style={{ fontSize: "11px", color: C.text2 }}>{sub}</div>
           </div>
         </div>
-        {copyText && (
-          <button
-            onClick={handleCopy}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "5px",
-              padding: "6px 14px",
-              borderRadius: "6px",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "12px",
-              fontWeight: "700",
-              background: copied ? C.greenBg : iconBg,
-              color: copied ? "#4ade80" : "#fff",
-            }}
-          >
-            {copied ? "✓ Copied" : "⎘ Copy prompt"}
-          </button>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: "auto", flexWrap: "wrap" }}>
+          {copyText && (
+            <button
+              onClick={handleCopy}
+              type="button"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "6px 14px",
+                borderRadius: "10px",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: "700",
+                background: copied ? C.greenBg : iconBg,
+                color: copied ? "#4ade80" : "#fff",
+              }}
+            >
+              {copied ? "✓ Copied" : copyLabel || "Copy prompt"}
+            </button>
+          )}
+        </div>
       </div>
       <div style={{ height: "1px", background: C.bd }} />
       <textarea
         style={{
           width: "100%",
           fontSize: "12px",
-          padding: "10px 14px",
+          padding: "14px 16px",
           border: "none",
-          background: C.bg0,
+          background: C.bg2,
           color: C.text0,
           resize: "vertical",
           fontFamily: "inherit",
-          lineHeight: "1.55",
-          minHeight: "90px",
+          lineHeight: "1.6",
+          minHeight: "110px",
           outline: "none",
         }}
         value={paste}
         onChange={(e) => onPaste(e.target.value)}
         placeholder={
-          copyText
-            ? "Paste response here..."
-            : "Paste notes or transcript here..."
+          pastePlaceholder || (copyText
+            ? "Paste the Rovo response here..."
+            : "Paste meeting notes, transcript, or summary here...")
         }
       />
       <div
@@ -2876,8 +2944,8 @@ function InputBlock({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "8px 14px",
-          background: C.bg3,
+          padding: "12px 16px",
+          background: C.bg2,
           borderTop: `1px solid ${C.bd}`,
           gap: "8px",
         }}
@@ -2904,10 +2972,11 @@ function InputBlock({
         <button
           onClick={onProcess}
           disabled={loading}
+          type="button"
           style={{
             padding: "6px 16px",
             border: "none",
-            borderRadius: "6px",
+            borderRadius: "10px",
             cursor: "pointer",
             fontSize: "12px",
             fontWeight: "700",
@@ -2958,13 +3027,195 @@ function Modal({ onClose, children }) {
   );
 }
 
+function ShellButton({
+  children,
+  onClick,
+  tone = "neutral",
+  active = false,
+  disabled = false,
+  style = {},
+}) {
+  const tones = {
+    neutral: {
+      background: active ? C.bg3 : C.bg2,
+      color: C.text0,
+      border: C.bd,
+    },
+    primary: {
+      background: C.blue,
+      color: "#ffffff",
+      border: alphaColor(C.blue, 0.26),
+    },
+    subtle: {
+      background: C.bg3,
+      color: C.text1,
+      border: C.bd,
+    },
+    warning: {
+      background: C.amberBg,
+      color: C.amber,
+      border: alphaColor(C.amber, 0.24),
+    },
+    danger: {
+      background: alphaColor(C.red, 0.1),
+      color: C.red,
+      border: alphaColor(C.red, 0.24),
+    },
+  };
+  const palette = tones[tone] || tones.neutral;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        fontSize: "12px",
+        fontWeight: "700",
+        padding: "10px 14px",
+        borderRadius: "14px",
+        border: `1px solid ${palette.border}`,
+        background: palette.background,
+        color: palette.color,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.58 : 1,
+        transition: "background .2s ease, border-color .2s ease, transform .2s ease",
+        boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.05)}`,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SummaryFilterCard({ label, value, hint, accent, onClick }) {
+  const body = (
+    <>
+      <span
+        style={{
+          fontSize: "11px",
+          fontWeight: "800",
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          color: C.text2,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          marginTop: "12px",
+          fontSize: "18px",
+          fontWeight: "800",
+          color: C.text0,
+          lineHeight: 1.2,
+        }}
+      >
+        {value}
+      </span>
+      {hint && (
+        <span
+          style={{
+            marginTop: "8px",
+            fontSize: "12px",
+            color: C.text1,
+            lineHeight: 1.45,
+          }}
+        >
+          {hint}
+        </span>
+      )}
+    </>
+  );
+
+  const sharedStyle = {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    minHeight: "116px",
+    padding: "18px 18px 16px",
+    borderRadius: "22px",
+    border: `1px solid ${alphaColor(accent || C.bd2, accent ? 0.18 : 0.12)}`,
+    background: C.bg2,
+    boxShadow: `0 18px 34px ${alphaColor("#0f172a", 0.06)}`,
+    textAlign: "left",
+    position: "relative",
+    overflow: "hidden",
+  };
+
+  if (!onClick) return <div style={sharedStyle}>{body}</div>;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...sharedStyle,
+        cursor: "pointer",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          right: "16px",
+          top: "16px",
+          width: "10px",
+          height: "10px",
+          borderRadius: "50%",
+          background: accent || C.blue,
+          boxShadow: `0 0 0 8px ${alphaColor(accent || C.blue, 0.1)}`,
+        }}
+      />
+      {body}
+    </button>
+  );
+}
+
+function RailNavItem({ label, color, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        padding: "12px 14px",
+        borderRadius: "16px",
+        border: `1px solid ${active ? alphaColor(color, 0.18) : "transparent"}`,
+        background: active ? alphaColor(color, 0.12) : "transparent",
+        color: active ? C.text0 : C.text1,
+        cursor: "pointer",
+        fontSize: "13px",
+        fontWeight: active ? "700" : "600",
+        textAlign: "left",
+      }}
+    >
+      <span
+        style={{
+          width: "10px",
+          height: "10px",
+          borderRadius: "50%",
+          background: color,
+          flexShrink: 0,
+          boxShadow: active ? `0 0 0 8px ${alphaColor(color, 0.1)}` : "none",
+        }}
+      />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [state, setState] = useState(
     () => loadState(DEFAULT_SPRINTS) || defaultState(DEFAULT_SPRINTS),
   );
-  const themeMode = state.theme || "dark";
-  const themeVars = THEME_VARS[themeMode] || THEME_VARS.dark;
+  const themeMode = state.theme || "light";
+  const themeVars = THEME_VARS[themeMode] || THEME_VARS.light;
   const [aiStatus, setAIStatus] = useState({
     primary: { state: "no_key", detail: "No Groq key saved" },
     fallback: { state: "no_key", detail: "No Cerebras key saved" },
@@ -3551,7 +3802,7 @@ export default function App() {
     {
       section: "Ceremonies",
       items: [
-        ["reference", "Sprint reference", "#0f766e"],
+        ["reference", "Sprint detail", "#0f766e"],
         ["standup", "Daily standup", "#2563eb"],
         ["refinement", "Refinement", "#22c55e"],
         ["planning", "Sprint planning", "#16a34a"],
@@ -3573,704 +3824,558 @@ export default function App() {
   ];
 
   const isInsights = curMeeting === "insights";
+  const workspaceAvailable = !isReference && (meeting.useRovo || meeting.useNotes);
+  const currentPageTitle = isInsights
+    ? "Velocity & insights"
+    : curMeeting === "reference"
+      ? "Sprint detail dashboard"
+      : curMeeting === "refinement"
+        ? "Refinement dashboard"
+        : curMeeting === "planning"
+          ? "Sprint planning dashboard"
+          : `${meeting.label} dashboard`;
+  const currentPageSubtitle = isInsights
+    ? "Review recent sprint performance, current commitment, and coaching signals in one place."
+    : isReference
+      ? "A simplified sprint snapshot that rolls the key current-sprint context into a single view."
+      : workspaceAvailable
+        ? "Capture the latest ceremony context and review the dashboard without splitting the page into separate editor and output columns."
+        : "Review the latest sprint context and supporting notes in a calmer, content-first layout.";
+  const captureSourceLabel = isReference
+    ? "Reference only"
+    : meeting.useRovo && meeting.useNotes
+      ? "Rovo + meeting notes"
+      : meeting.useRovo
+        ? "Rovo only"
+        : meeting.useNotes
+          ? "Meeting notes"
+          : "Dashboard only";
+  const shellBackground = themeMode === "light"
+    ? "#f6f8fc"
+    : "radial-gradient(circle at top left, rgba(20,25,34,0.98), rgba(11,15,22,0.94) 42%, rgba(7,10,15,0.98) 100%)";
+  const frameBackground = themeMode === "light"
+    ? "#f6f8fc"
+    : "rgba(10,14,20,0.72)";
+  const pageEyebrow = isInsights ? "Performance view" : "Sprint workspace";
+  const statusCardHint = state.lastUpdated
+    ? `Updated ${state.lastUpdated}`
+    : "No updates captured yet";
 
   return (
     <div
+      className="app-shell"
       style={{
         ...themeVars,
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        maxHeight: "100vh",
-        overflow: "hidden",
-        background: C.bg0,
+        background: shellBackground,
         color: C.text0,
         fontSize: "13px",
-        fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+        fontFamily: '"Avenir Next", "Segoe UI Variable Text", "Segoe UI", sans-serif',
         colorScheme: themeMode,
       }}
+      data-theme={themeMode}
     >
-      {/* Header */}
       <div
+        className="app-frame"
         style={{
-          background: C.bg1,
-          borderBottom: `1px solid ${C.bd}`,
-          padding: "0 20px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          minHeight: "58px",
-          flexShrink: 0,
-          gap: "12px",
-          flexWrap: "wrap",
+          background: frameBackground,
+          border: `1px solid ${C.bd}`,
+          boxShadow: themeMode === "light"
+            ? "0 32px 80px rgba(15,23,42,0.12)"
+            : "0 30px 80px rgba(0,0,0,0.44)",
+          backdropFilter: "blur(18px)",
         }}
       >
-        <div
+        <aside
+          className="app-rail"
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            padding: "10px 0",
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ fontSize: "17px", fontWeight: "700", letterSpacing: "-0.01em" }}>
-            {projectProfile.dashboardTitle || `${projectContext.projectKey} Scrum`}
-          </span>
-          <span
-            style={{
-              fontSize: "12px",
-              fontWeight: "700",
-              padding: "7px 12px",
-              borderRadius: "999px",
-              background: C.blueBg,
-              color: C.blue,
-              border: `1px solid ${alphaColor("#3b82f6", 0.16)}`,
-            }}
-          >
-            ● {projectContext.epic}
-          </span>
-          <span
-            style={{
-              fontSize: "12px",
-              fontWeight: "700",
-              padding: "7px 12px",
-              borderRadius: "999px",
-              background: C.amberBg,
-              color: C.amber,
-              border: `1px solid ${alphaColor("#d97706", 0.16)}`,
-            }}
-          >
-            {activeSprint ? activeSprint.name : "No sprint"}
-          </span>
-          <span
-            style={{
-              fontSize: "12px",
-              fontWeight: "700",
-              padding: "7px 12px",
-              borderRadius: "999px",
-              background: C.tealBg,
-              color: C.teal,
-              border: `1px solid ${alphaColor("#0891b2", 0.16)}`,
-            }}
-          >
-            {projectContext.epicName}
-          </span>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            padding: "10px 0",
-            flexWrap: "wrap",
+            background: themeMode === "light"
+              ? alphaColor("#ffffff", 0.82)
+              : alphaColor(C.bg1, 0.96),
+            borderRight: `1px solid ${C.bd}`,
           }}
         >
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              fontSize: "12px",
-              padding: "7px 12px",
-              borderRadius: "999px",
+              padding: "18px 18px 20px",
+              borderRadius: "24px",
+              background: themeMode === "light"
+                ? "linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,247,252,0.92))"
+                : "linear-gradient(180deg, rgba(22,28,39,0.98), rgba(14,19,28,0.94))",
               border: `1px solid ${C.bd}`,
-              color: C.text0,
-              background: C.bg2,
+              boxShadow: `0 20px 34px ${alphaColor("#0f172a", 0.08)}`,
             }}
           >
-            <span
+            <div
               style={{
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
-                background: apiDot(),
-                flexShrink: 0,
+                fontSize: "11px",
+                fontWeight: "800",
+                letterSpacing: ".12em",
+                textTransform: "uppercase",
+                color: C.text2,
+                marginBottom: "10px",
               }}
-            />
-            {apiLabel()}
+            >
+              Scrum Intelligence
+            </div>
+            <div style={{ fontSize: "28px", fontWeight: "800", letterSpacing: "-0.04em", marginBottom: "8px" }}>
+              {projectProfile.projectKey}
+            </div>
+            <div style={{ fontSize: "13px", color: C.text1, lineHeight: 1.6 }}>
+              {projectProfile.projectName}
+            </div>
           </div>
-          <ProviderStatusChip name="Groq 70B" info={aiStatus.primary} />
-          <ProviderStatusChip name="Cerebras Llama 3.1 8B" info={aiStatus.fallback} />
-          {state.lastUpdated && (
-            <span style={{ fontSize: "12px", color: C.text2 }}>
-              Updated {state.lastUpdated}
-            </span>
-          )}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              border: `1px solid ${C.bd}`,
-              borderRadius: "8px",
-              overflow: "hidden",
-              background: C.bg2,
-            }}
-          >
-            {[
-              ["dark", "Dark"],
-              ["light", "Light"],
-            ].map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                aria-pressed={themeMode === mode}
-                onClick={() => setThemeMode(mode)}
-                style={{
-                  fontSize: "12px",
-                  padding: "8px 14px",
-                  border: "none",
-                  borderRight: mode === "dark" ? `1px solid ${C.bd}` : "none",
-                  background: themeMode === mode ? C.bg3 : "transparent",
-                  color: themeMode === mode ? C.text0 : C.text1,
-                  cursor: "pointer",
-                  fontWeight: themeMode === mode ? "700" : "600",
-                }}
-              >
-                {label}
-              </button>
+
+          <div style={{ marginTop: "18px" }}>
+            <ShellButton
+              onClick={() => setModal("project-setup")}
+              tone="primary"
+              style={{ width: "100%", textAlign: "left", padding: "13px 14px" }}
+            >
+              Project setup
+            </ShellButton>
+          </div>
+
+          <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            {NAV.map(({ section, items }) => (
+              <div key={section} className="app-rail-section">
+                <div
+                  style={{
+                    padding: "0 8px",
+                    fontSize: "11px",
+                    fontWeight: "800",
+                    color: C.text2,
+                    textTransform: "uppercase",
+                    letterSpacing: ".08em",
+                  }}
+                >
+                  {section}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {items.map(([id, label, color]) => (
+                    <RailNavItem
+                      key={id}
+                      label={label}
+                      color={color}
+                      active={curMeeting === id}
+                      onClick={() => switchMeeting(id)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
-          <button
-            style={{
-              fontSize: "12px",
-              padding: "7px 13px",
-              border: `1px solid ${C.bd}`,
-              borderRadius: "10px",
-              background: C.bg2,
-              color: C.text0,
-              cursor: "pointer",
-              fontWeight: "600",
-            }}
-            onClick={() => setModal("sprints")}
-          >
-            Sprints
-          </button>
-          <button
-            style={{
-              fontSize: "12px",
-              padding: "7px 13px",
-              border: `1px solid ${C.bd}`,
-              borderRadius: "10px",
-              background: C.bg2,
-              color: C.text0,
-              cursor: "pointer",
-              fontWeight: "600",
-            }}
-            onClick={() => setModal("history")}
-          >
-            History
-          </button>
-          <button
-            style={{
-              fontSize: "12px",
-              padding: "8px 15px",
-              border: `1px solid ${C.bd}`,
-              borderRadius: "10px",
-              background: C.amberBg,
-              color: C.amber,
-              cursor: "pointer",
-              fontWeight: "600",
-            }}
-            onClick={() => endSprint(activeSprint)}
-          >
-            End sprint
-          </button>
-          <button
-            style={{
-              fontSize: "12px",
-              padding: "8px 15px",
-              border: `1px solid ${C.bd}`,
-              borderRadius: "10px",
-              background: C.bg2,
-              color: C.red,
-              cursor: "pointer",
-              fontWeight: "600",
-            }}
-            onClick={() => {
-              if (window.confirm("Clear dashboard data? Saved API keys and settings will be kept.")) {
-                persist((prev) => clearDashboardData(prev, DEFAULT_SPRINTS));
-                setFresh({});
-                setRovoPaste("");
-                setNotes("");
-                setRovoSt("");
-                setNotesSt("");
-                showToast("Dashboard data cleared. API keys kept.");
-              }
-            }}
-          >
-            Clear data
-          </button>
-          <button
-            style={{
-              fontSize: "12px",
-              padding: "8px 15px",
-              border: "none",
-              borderRadius: "10px",
-              background: C.blue,
-              color: "#fff",
-              cursor: "pointer",
-              fontWeight: "700",
-            }}
-            onClick={() => setModal("api")}
-          >
-            ⚙ API keys
-          </button>
-        </div>
-      </div>
 
-      {showConnectionTip && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-            padding: "10px 18px",
-            borderBottom: `1px solid ${C.bd}`,
-            background: C.amberBg,
-            color: "#fdba74",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span
-              style={{
-                fontSize: "10px",
-                fontWeight: "700",
-                padding: "3px 8px",
-                borderRadius: "20px",
-                background: "rgba(251,146,60,0.16)",
-                color: "#fdba74",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Connection Tip
-            </span>
-            <span style={{ fontSize: "12px", lineHeight: "1.5" }}>
-              If data fails to load, ensure your 'CORS Unblock' browser extension is turned ON.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => persist({ connectionTipDismissed: true })}
-            style={{
-              fontSize: "11px",
-              padding: "5px 10px",
-              border: `1px solid rgba(251,146,60,0.35)`,
-              borderRadius: "6px",
-              background: "transparent",
-              color: "#fdba74",
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Body */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "180px 1fr",
-          flex: 1,
-          overflow: "hidden",
-          minHeight: 0,
-        }}
-      >
-        {/* Nav */}
-        <div
-          style={{
-            background: C.bg1,
-            borderRight: `1px solid ${C.bd}`,
-            display: "flex",
-            flexDirection: "column",
-            overflowY: "auto",
-          }}
-        >
           <div
             style={{
-              padding: "14px 12px 8px",
+              marginTop: "auto",
+              paddingTop: "22px",
+              borderTop: `1px solid ${C.bd}`,
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
             }}
           >
-            <button
-              type="button"
-              onClick={() => setModal("project-setup")}
+            <div
               style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "12px 12px",
-                borderRadius: "14px",
-                border: `1px solid ${alphaColor(C.amber, 0.35)}`,
-                background: `linear-gradient(180deg, ${alphaColor(C.amber, 0.22)}, ${alphaColor(C.amber, 0.14)})`,
-                color: C.text0,
-                cursor: "pointer",
-                boxShadow: `inset 0 -2px 0 ${alphaColor(C.amber, 0.22)}`,
+                fontSize: "11px",
+                fontWeight: "800",
+                color: C.text2,
+                textTransform: "uppercase",
+                letterSpacing: ".08em",
               }}
             >
+              Controls
+            </div>
+            <ShellButton onClick={() => setModal("api")} style={{ width: "100%", textAlign: "left" }}>
+              API keys
+            </ShellButton>
+            <ShellButton
+              onClick={() => {
+                if (window.confirm("Clear dashboard data? Saved API keys and settings will be kept.")) {
+                  persist((prev) => clearDashboardData(prev, DEFAULT_SPRINTS));
+                  setFresh({});
+                  setRovoPaste("");
+                  setNotes("");
+                  setRovoSt("");
+                  setNotesSt("");
+                  showToast("Dashboard data cleared. API keys kept.");
+                }
+              }}
+              tone="danger"
+              style={{ width: "100%", textAlign: "left" }}
+            >
+              Clear data
+            </ShellButton>
+            <div
+              style={{
+                marginTop: "8px",
+                padding: "14px 2px 0",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              <div style={{ fontSize: "12px", fontWeight: "700", color: C.text0 }}>
+                {projectProfile.projectLabel || "Project"}
+              </div>
+              <div style={{ fontSize: "12px", color: C.text1, lineHeight: 1.6 }}>
+                {projectContext.epic}
+                {projectContext.epicName ? ` · ${projectContext.epicName}` : ""}
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section className="app-main" style={{ background: "transparent" }}>
+          <div className="app-main-scroll">
+            {showConnectionTip && (
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  gap: "8px",
-                  marginBottom: "4px",
+                  gap: "12px",
+                  padding: "12px 16px",
+                  marginBottom: "18px",
+                  border: `1px solid ${alphaColor(C.amber, 0.24)}`,
+                  borderRadius: "18px",
+                  background: C.amberBg,
+                  color: "#fdba74",
                 }}
               >
-                <span style={{ fontSize: "13px", fontWeight: "800" }}>
-                  Project setup
-                </span>
-                {!state.projectSetupAppliedAt && (
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                   <span
                     style={{
                       fontSize: "10px",
                       fontWeight: "800",
+                      padding: "4px 8px",
+                      borderRadius: "999px",
+                      background: alphaColor("#fb923c", 0.16),
+                      color: "#fdba74",
                       letterSpacing: ".08em",
                       textTransform: "uppercase",
-                      color: C.amber,
                     }}
                   >
-                    Start
+                    Connection Tip
                   </span>
+                  <span style={{ fontSize: "12px", lineHeight: 1.5 }}>
+                    If data fails to load, ensure your CORS Unblock browser extension is enabled.
+                  </span>
+                </div>
+                <ShellButton
+                  onClick={() => persist({ connectionTipDismissed: true })}
+                  tone="subtle"
+                  style={{ padding: "7px 12px", borderRadius: "10px" }}
+                >
+                  Dismiss
+                </ShellButton>
+              </div>
+            )}
+
+            <div className="app-page-header">
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: "800",
+                    letterSpacing: ".12em",
+                    textTransform: "uppercase",
+                    color: C.text2,
+                    marginBottom: "10px",
+                  }}
+                >
+                  {pageEyebrow}
+                </div>
+                <div style={{ fontSize: "40px", lineHeight: 1, fontWeight: "800", letterSpacing: "-0.05em" }}>
+                  {currentPageTitle}
+                </div>
+                <div style={{ fontSize: "14px", color: C.text1, lineHeight: 1.65, marginTop: "10px", maxWidth: "820px" }}>
+                  {currentPageSubtitle}
+                </div>
+                {isPlanningLikeView(curMeeting) && (
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      color: "#86efac",
+                      background: C.greenBg,
+                      border: `1px solid ${alphaColor("#22c55e", 0.22)}`,
+                      borderRadius: "999px",
+                      padding: "6px 11px",
+                    }}
+                  >
+                    {planningTargetLabel}
+                  </div>
                 )}
               </div>
-              <div style={{ fontSize: "11px", color: C.text1, lineHeight: "1.45" }}>
-                One Rovo prompt to set up the project, sprint, epics, and board.
-              </div>
-            </button>
-          </div>
-          {NAV.map(({ section, items }) => (
-            <React.Fragment key={section}>
-              <div
-                style={{
-                  padding: "14px 12px 4px",
-                  fontSize: "11px",
-                  fontWeight: "700",
-                  color: C.text2,
-                  textTransform: "uppercase",
-                  letterSpacing: ".08em",
-                }}
-              >
-                {section}
-              </div>
-              {items.map(([id, label, color]) => (
+
+              <div className="app-page-actions">
+                <ShellButton onClick={() => setModal("history")}>
+                  History
+                </ShellButton>
+                <ShellButton onClick={() => endSprint(activeSprint)} tone="warning">
+                  End sprint
+                </ShellButton>
                 <div
-                  key={id}
-                  onClick={() => switchMeeting(id)}
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "10px",
-                    padding: "10px 14px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    userSelect: "none",
-                    color: curMeeting === id ? C.text0 : C.text1,
-                    fontWeight: curMeeting === id ? "600" : "500",
-                    borderLeft: `4px solid ${curMeeting === id ? color : "transparent"}`,
-                    background:
-                      curMeeting === id
-                        ? C.bg3
-                        : "transparent",
+                    border: `1px solid ${C.bd}`,
+                    borderRadius: "14px",
+                    overflow: "hidden",
+                    background: C.bg2,
+                    boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.04)}`,
                   }}
                 >
-                  <span
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      background: color,
-                      flexShrink: 0,
-                    }}
-                  />
-                  {label}
+                  {[
+                    ["dark", "Dark"],
+                    ["light", "Light"],
+                  ].map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={themeMode === mode}
+                      onClick={() => setThemeMode(mode)}
+                      style={{
+                        fontSize: "12px",
+                        padding: "10px 14px",
+                        border: "none",
+                        borderRight: mode === "dark" ? `1px solid ${C.bd}` : "none",
+                        background: themeMode === mode ? C.bg3 : "transparent",
+                        color: themeMode === mode ? C.text0 : C.text1,
+                        cursor: "pointer",
+                        fontWeight: themeMode === mode ? "700" : "600",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </React.Fragment>
-          ))}
-          <div
-            style={{
-              marginTop: "auto",
-              padding: "12px 14px",
-              borderTop: `1px solid ${C.bd}`,
-              fontSize: "11px",
-              color: C.text2,
-              lineHeight: "1.7",
-            }}
-          >
-            <div
-              style={{
-                fontWeight: "600",
-                color: C.text1,
-                fontSize: "12px",
-                marginBottom: "2px",
-              }}
-            >
-              {projectProfile.projectLabel || "Project"}
+              </div>
             </div>
-            {projectProfile.projectName || projectContext.epicName}
-            <br />
-            Epic {projectContext.epic}
-          </div>
-        </div>
 
-        {/* Content */}
-        {isInsights ? (
-          <Insights
-            state={state}
-            persist={persist}
-            onAIStatusChange={(providers) => {
-              if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-              height: "100%",
-              minHeight: 0,
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "360px 1fr",
-                overflow: "hidden",
-                minHeight: 0,
-                flex: 1,
-              }}
-            >
-            {/* Input panel */}
-            <div
-              style={{
-                background: C.bg1,
-                borderRight: `1px solid ${C.bd}`,
-                overflowY: "auto",
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-                minHeight: 0,
-              }}
-            >
+            {toast.show && (
               <div
                 style={{
-                  padding: "16px 18px 12px",
-                  borderBottom: `1px solid ${C.bd}`,
-                  position: "sticky",
-                  top: 0,
-                  background: C.bg1,
-                  zIndex: 5,
+                  marginBottom: "18px",
+                  padding: "10px 14px",
+                  borderRadius: "16px",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  background: toast.err ? C.redBg : C.blueBg,
+                  color: toast.err ? "#f87171" : "#93c5fd",
+                  border: `1px solid ${toast.err ? C.red : C.blue}`,
                 }}
+              >
+                {toast.msg}
+              </div>
+            )}
+
+            <div className="app-filter-grid">
+              <SummaryFilterCard
+                label="Sprint"
+                value={activeSprint ? activeSprint.name : "No sprint"}
+                hint={activeSprint ? `${activeSprint.start} to ${activeSprint.end}` : "Open project setup to seed sprint context"}
+                accent={C.amber}
+                onClick={() => setModal("sprints")}
+              />
+              <SummaryFilterCard
+                label="Epic"
+                value={projectContext.epic || projectProfile.projectKey}
+                hint={projectContext.epicName || projectProfile.projectName}
+                accent={C.blue}
+                onClick={() => setModal("project-setup")}
+              />
+              <SummaryFilterCard
+                label="Capture"
+                value={captureSourceLabel}
+                hint={statusCardHint}
+                accent={apiDot()}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "999px",
+                  border: `1px solid ${C.bd}`,
+                  color: C.text0,
+                  background: C.bg2,
+                  boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.04)}`,
+                }}
+              >
+                <span
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    background: apiDot(),
+                    flexShrink: 0,
+                  }}
+                />
+                {apiLabel()}
+              </div>
+              <ProviderStatusChip name="Groq 70B" info={aiStatus.primary} />
+              <ProviderStatusChip name="Cerebras Llama 3.1 8B" info={aiStatus.fallback} />
+            </div>
+
+            {isInsights ? (
+              <Insights
+                state={state}
+                persist={persist}
+                onAIStatusChange={(providers) => {
+                  if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
+                }}
+              />
+            ) : (
+              <div className="app-dashboard-stack">
+                {workspaceAvailable && (
+                  <div
+                    style={{
+                      background: C.panel2,
+                      border: `1px solid ${C.bd}`,
+                      borderRadius: "26px",
+                      padding: "18px",
+                      boxShadow: `0 24px 46px ${alphaColor("#0f172a", 0.07)}`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        flexWrap: "wrap",
+                        marginBottom: "14px",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: "17px", fontWeight: "700", color: C.text0 }}>
+                          Capture updates
+                        </div>
+                        <div style={{ fontSize: "12px", color: C.text1, lineHeight: 1.6, marginTop: "4px" }}>
+                          Copy the prompt if needed, then paste the response or meeting notes directly below. No extra open-input step.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="app-workspace-grid">
+                      {meeting.useRovo && (
+                        <InputBlock
+                          iconBg="#0052cc"
+                          iconLabel="J"
+                          title="Jira Rovo Chat"
+                          sub={meeting.rovoLabel}
+                          copyText={meetingRovoPrompt}
+                          copyLabel="Copy Rovo Prompt"
+                          paste={rovoPaste}
+                          onPaste={setRovoPaste}
+                          pastePlaceholder="Paste the Rovo response here..."
+                          status={rovoStatus}
+                          loading={rovoLoading}
+                          onProcess={() => process("rovo")}
+                          btnBg="#0052cc"
+                        />
+                      )}
+                      {meeting.useNotes && (
+                        <InputBlock
+                          iconBg="#0e9488"
+                          iconLabel="H"
+                          title={notesInputTitle}
+                          sub={notesInputSub}
+                          copyText={null}
+                          paste={notesPaste}
+                          onPaste={setNotes}
+                          pastePlaceholder="Paste meeting notes, transcript, or summary here..."
+                          status={notesStatus}
+                          loading={notesLoading}
+                          onProcess={() => process("notes")}
+                          btnBg="#0e9488"
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {curMeeting === "review" && (
+                  <div
+                    style={{
+                      background: C.panel2,
+                      border: `1px solid ${C.bd}`,
+                      borderRadius: "26px",
+                      padding: "18px",
+                      boxShadow: `0 24px 46px ${alphaColor("#0f172a", 0.07)}`,
+                    }}
+                  >
+                    <SprintReviewToolkit
+                      colors={C}
+                      sprint={activeSprint}
+                      projectProfile={projectProfile}
+                      projectContext={projectContext}
+                      value={reviewPromptContext}
+                      onChange={updateReviewPromptContext}
+                      onToast={showToast}
+                    />
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    background: C.panel2,
+                    border: `1px solid ${C.bd}`,
+                    borderRadius: "28px",
+                    padding: "20px",
+                    boxShadow: `0 28px 56px ${alphaColor("#0f172a", 0.08)}`,
+                  }}
                 >
                   <div
                     style={{
                       display: "flex",
-                      alignItems: "center",
+                      alignItems: "flex-start",
                       justifyContent: "space-between",
-                      gap: "12px",
+                      gap: "16px",
+                      flexWrap: "wrap",
+                      marginBottom: "18px",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: "16px",
-                        fontWeight: "600",
-                        borderLeft: `3px solid ${meeting.color}`,
-                        paddingLeft: "10px",
-                      }}
-                    >
-                      {meeting.label}
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: "800", color: C.text2, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: "8px" }}>
+                        Dashboard
+                      </div>
+                      <div style={{ fontSize: "22px", fontWeight: "800", color: C.text0, lineHeight: 1.1 }}>
+                        {isReference ? "Current sprint snapshot" : meeting.label}
+                      </div>
+                      <div style={{ fontSize: "12px", color: C.text1, marginTop: "8px" }}>
+                        {state.lastUpdated ? `Updated ${state.lastUpdated}` : "No updates yet"}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={clearCurrentMeeting}
-                      disabled={!canClearCurrentMeeting}
-                      style={{
-                        fontSize: "11px",
-                        fontWeight: "700",
-                        padding: "7px 11px",
-                        borderRadius: "999px",
-                        border: `1px solid ${alphaColor(C.red, 0.28)}`,
-                        background: canClearCurrentMeeting ? alphaColor(C.red, 0.12) : C.bg3,
-                        color: canClearCurrentMeeting ? C.red : C.text2,
-                        cursor: canClearCurrentMeeting ? "pointer" : "not-allowed",
-                        opacity: canClearCurrentMeeting ? 1 : 0.65,
-                        flexShrink: 0,
-                      }}
-                    >
-                      Clear this tab
-                    </button>
-                  </div>
-                  {isPlanningLikeView(curMeeting) && (
-                    <div
-                      style={{
-                        marginTop: "10px",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        fontSize: "11px",
-                        fontWeight: "700",
-                        color: "#86efac",
-                        background: C.greenBg,
-                        border: `1px solid ${alphaColor("#22c55e", 0.22)}`,
-                        borderRadius: "999px",
-                        padding: "5px 10px",
-                      }}
-                    >
-                      {planningTargetLabel}
-                    </div>
-                  )}
-                </div>
-              <div
-                style={{
-                  padding: "14px 18px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "14px",
-                }}
-              >
-                {curMeeting === "refinement" && (
-                  <RefinementWorkspaceCard targetSprintLabel={nextSprint?.name || "Upcoming sprint"} />
-                )}
-                {isReference && (
-                  <div
-                    style={{
-                      padding: "16px 16px",
-                      borderRadius: "14px",
-                      border: `1px solid ${alphaColor(C.teal, 0.24)}`,
-                      background: C.bg2,
-                      color: C.text1,
-                      fontSize: "13px",
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    Use the other tabs to capture standups, refinement, planning, review, retro, discovery, and stakeholder notes. This page rolls them into one sprint reference dashboard for quick revisit.
-                  </div>
-                )}
-                {meeting.useRovo && (
-                  <InputBlock
-                    iconBg="#0052cc"
-                    iconLabel="J"
-                    title="Jira Rovo Chat"
-                    sub={meeting.rovoLabel}
-                    copyText={meetingRovoPrompt}
-                    paste={rovoPaste}
-                    onPaste={setRovoPaste}
-                    status={rovoStatus}
-                    loading={rovoLoading}
-                    onProcess={() => process("rovo")}
-                    btnBg="#0052cc"
-                  />
-                )}
-                {meeting.useNotes && (
-                  <InputBlock
-                    iconBg="#0e9488"
-                    iconLabel="H"
-                    title={notesInputTitle}
-                    sub={notesInputSub}
-                    copyText={null}
-                    paste={notesPaste}
-                    onPaste={setNotes}
-                    status={notesStatus}
-                    loading={notesLoading}
-                    onProcess={() => process("notes")}
-                    btnBg="#0e9488"
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Output panel */}
-            <div
-              style={{
-                overflowY: "auto",
-                overflowX: "hidden",
-                background: C.bg0,
-                height: "100%",
-                minHeight: 0,
-              }}
-            >
-              <div
-                style={{
-                  padding: "14px 18px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: "2px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "14px", fontWeight: "600" }}>
-                      {curMeeting === "refinement"
-                        ? "Refinement dashboard"
-                        : curMeeting === "reference"
-                          ? "Sprint reference dashboard"
-                          : `${meeting.label} dashboard`}
-                    </span>
-                    {isPlanningLikeView(curMeeting) && (
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: "700",
-                          color: "#86efac",
-                          background: C.greenBg,
-                          border: `1px solid ${alphaColor("#22c55e", 0.22)}`,
-                          borderRadius: "999px",
-                          padding: "4px 10px",
-                        }}
+                    {!isReference && (
+                      <ShellButton
+                        onClick={clearCurrentMeeting}
+                        tone="danger"
+                        disabled={!canClearCurrentMeeting}
                       >
-                        {planningTargetLabel}
-                      </span>
+                        Clear this tab
+                      </ShellButton>
                     )}
                   </div>
-                  <span style={{ fontSize: "11px", color: C.text2 }}>
-                    {state.lastUpdated
-                      ? `Updated ${state.lastUpdated}`
-                      : "No updates yet"}
-                  </span>
-                </div>
-                {toast.show && (
-                  <div
-                    style={{
-                      padding: "8px 14px",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: "500",
-                      background: toast.err ? C.redBg : C.blueBg,
-                      color: toast.err ? "#f87171" : "#93c5fd",
-                      border: `1px solid ${toast.err ? C.red : C.blue}`,
-                    }}
-                  >
-                    {toast.msg}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <MeetingDashboard id={curMeeting} data={mData} fresh={fresh} sprint={activeSprint} jiraBase={state.jiraBase} nextSprint={nextSprint} state={state} />
                   </div>
-                )}
-                {curMeeting === "review" && (
-                  <SprintReviewToolkit
-                    colors={C}
-                    sprint={activeSprint}
-                    projectProfile={projectProfile}
-                    projectContext={projectContext}
-                    value={reviewPromptContext}
-                    onChange={updateReviewPromptContext}
-                    onToast={showToast}
-                  />
-                )}
-                <MeetingDashboard id={curMeeting} data={mData} fresh={fresh} sprint={activeSprint} jiraBase={state.jiraBase} nextSprint={nextSprint} state={state} />
+                </div>
               </div>
-            </div>
-            </div>
+            )}
           </div>
-        )}
+        </section>
       </div>
 
       {/* Project Setup Modal */}
