@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import "./App.css";
 import { MEETINGS, DEFAULT_SPRINTS } from "./config";
 import { callAI, buildContext, testProviders } from "./api";
@@ -6,6 +6,7 @@ import {
   applyProjectSetupState,
   loadState,
   saveState,
+  STORE_KEY,
   clearDashboardData,
   defaultState,
   getMeetingData,
@@ -120,6 +121,13 @@ const AI_STATUS_STYLE = {
 
 const DEFAULT_PROJECT_CONTEXT = deriveProjectContextFromProfile(DEFAULT_PROJECT_PROFILE);
 const SPECIAL_VIEWS = {
+  setup: {
+    id: "setup",
+    label: "Project setup",
+    color: "#3f6df6",
+    useRovo: false,
+    useNotes: false,
+  },
   reference: {
     id: "reference",
     label: "Sprint detail",
@@ -3364,6 +3372,272 @@ function QuickStartGuide({
   );
 }
 
+function ProjectSetupPage({
+  projectProfile,
+  projectContext,
+  projectSetupPrompt,
+  setupPaste,
+  setSetupPaste,
+  setupStatus,
+  setupLoading,
+  state,
+  copyProjectSetupPrompt,
+  applyProjectSetup,
+  onOpenReference,
+}) {
+  return (
+    <div className="app-dashboard-stack">
+      <QuickStartGuide
+        isReference={false}
+        isInsights={false}
+        workspaceAvailable={true}
+        meetingLabel="Project setup"
+        captureSourceLabel="Rovo + meeting notes"
+        onProjectSetup={null}
+        onOpenReference={onOpenReference}
+      />
+
+      <div
+        style={{
+          background: C.panel2,
+          border: `1px solid ${C.bd}`,
+          borderRadius: "26px",
+          padding: "18px",
+          boxShadow: `0 24px 46px ${alphaColor("#0f172a", 0.07)}`,
+        }}
+      >
+        <div style={{ fontSize: "16px", fontWeight: "700", color: C.text0, marginBottom: "8px" }}>
+          Project setup prompt
+        </div>
+        <div style={{ fontSize: "13px", color: C.text1, lineHeight: 1.7, marginBottom: "14px" }}>
+          Use this page first when starting a new dashboard or refreshing the same project. Copy the setup prompt, run it in Rovo, then paste the response below so the dashboard can load the right project, sprint, epic, and team context.
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "8px",
+            marginBottom: "14px",
+          }}
+        >
+          {[
+            `Current project: ${projectProfile.projectKey} — ${projectProfile.projectName}`,
+            `Primary epic: ${projectContext.epic}${projectContext.epicName ? ` — ${projectContext.epicName}` : ""}`,
+            `Sprint naming: ${projectProfile.sprintNameTemplate}`,
+            projectProfile.sprintDurationDays
+              ? `Sprint cadence: ${projectProfile.sprintDurationDays}-day sprint${projectProfile.sprintGapDays >= 0 ? ` · ${projectProfile.sprintGapDays} gap day${projectProfile.sprintGapDays === 1 ? "" : "s"}` : ""}`
+              : null,
+            projectProfile.team?.length ? `Team members known: ${projectProfile.team.length}` : null,
+            projectProfile.workstreams?.length ? `Known workstreams: ${projectProfile.workstreams.length}` : null,
+            state.lastUpdated
+              ? `Last data update: ${state.lastUpdated}`
+              : "Last data update: No saved updates yet",
+            state.projectSetupAppliedAt
+              ? `Last setup: ${new Date(state.projectSetupAppliedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}`
+              : "No setup applied yet",
+          ].filter(Boolean).map((chip) => (
+            <span
+              key={chip}
+              style={{
+                padding: "6px 10px",
+                borderRadius: "999px",
+                background: C.bg3,
+                border: `1px solid ${C.bd}`,
+                fontSize: "11px",
+                color: C.text1,
+              }}
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "14px",
+            marginBottom: "16px",
+          }}
+        >
+          {[
+            {
+              accent: C.blue,
+              title: "What the setup should return",
+              items: [
+                "Project profile and project name",
+                "Active sprint and upcoming sprint list",
+                "Primary epic and workstreams in play",
+                "Current team members and active sprint board",
+              ],
+            },
+            {
+              accent: C.amber,
+              title: "Use setup when",
+              items: [
+                "Starting a new project dashboard",
+                "Refreshing the same project with newer Jira context",
+                "The team, sprint cadence, or board context has changed",
+                "You want the whole dashboard to adapt cleanly",
+              ],
+            },
+          ].map((card) => (
+            <div
+              key={card.title}
+              style={{
+                padding: "18px",
+                borderRadius: "22px",
+                border: `1px solid ${alphaColor(card.accent, 0.18)}`,
+                background: C.bg2,
+                boxShadow: `0 18px 34px ${alphaColor("#0f172a", 0.06)}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "11px",
+                  fontWeight: "800",
+                  letterSpacing: ".08em",
+                  textTransform: "uppercase",
+                  color: card.accent,
+                  marginBottom: "10px",
+                }}
+              >
+                {card.title}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {card.items.map((item) => (
+                  <div key={item} style={{ display: "flex", gap: "10px", fontSize: "12px", color: C.text1, lineHeight: 1.6 }}>
+                    <span
+                      style={{
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "999px",
+                        background: card.accent,
+                        marginTop: "6px",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            border: `1px solid ${C.bd2}`,
+            borderRadius: "16px",
+            overflow: "hidden",
+            background: C.bg0,
+            marginBottom: "12px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "10px",
+              padding: "12px 14px",
+              background: C.bg3,
+              borderBottom: `1px solid ${C.bd}`,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: C.text0 }}>
+                Copy setup prompt
+              </div>
+              <div style={{ fontSize: "11px", color: C.text2 }}>
+                One prompt to gather the project profile, sprint cadence, team, workstreams, and active sprint board in one response.
+              </div>
+            </div>
+            <ShellButton onClick={copyProjectSetupPrompt} tone="primary">
+              Copy setup prompt
+            </ShellButton>
+          </div>
+          <div
+            style={{
+              maxHeight: "220px",
+              overflowY: "auto",
+              padding: "12px 14px",
+              fontSize: "12px",
+              lineHeight: "1.6",
+              color: C.text0,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {projectSetupPrompt}
+          </div>
+        </div>
+
+        <label
+          style={{
+            fontSize: "11px",
+            fontWeight: "600",
+            color: C.text1,
+            display: "block",
+            marginBottom: "6px",
+          }}
+        >
+          Paste the Rovo setup response
+        </label>
+        <textarea
+          value={setupPaste}
+          onChange={(e) => setSetupPaste(e.target.value)}
+          placeholder="Paste the project setup response here..."
+          style={{
+            width: "100%",
+            minHeight: "220px",
+            fontSize: "12px",
+            padding: "12px 14px",
+            border: `1px solid ${C.bd2}`,
+            borderRadius: "14px",
+            background: C.bg0,
+            color: C.text0,
+            resize: "vertical",
+            fontFamily: "inherit",
+            lineHeight: "1.6",
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+        <div style={{ fontSize: "11px", color: C.text2, marginTop: "8px", lineHeight: "1.6" }}>
+          Applying setup updates the project profile, sprint cadence, sprint list, current team, and active sprint board. Rerunning setup for the same project refreshes that context without wiping saved sprint data. Switching to a different project clears old meeting data, history, and insights while keeping API keys, theme, and Jira base URL.
+        </div>
+
+        {setupStatus && (
+          <div
+            style={{
+              marginTop: "12px",
+              padding: "10px 12px",
+              borderRadius: "12px",
+              fontSize: "11px",
+              lineHeight: "1.5",
+              background: /error/i.test(setupStatus) ? C.redBg : C.blueBg,
+              color: /error|cancelled/i.test(setupStatus) ? "#f87171" : "#93c5fd",
+              border: `1px solid ${/error|cancelled/i.test(setupStatus) ? C.red : C.blue}`,
+            }}
+          >
+            {setupStatus}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: "8px", marginTop: "16px", flexWrap: "wrap" }}>
+          <ShellButton onClick={applyProjectSetup} tone="primary" disabled={setupLoading}>
+            {setupLoading ? "Applying..." : "Apply setup"}
+          </ShellButton>
+          <ShellButton onClick={onOpenReference} tone="subtle">
+            Open Sprint detail
+          </ShellButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RailNavItem({ label, color, active, onClick }) {
   return (
     <button
@@ -3406,6 +3680,7 @@ export default function App() {
   const [state, setState] = useState(
     () => loadState(DEFAULT_SPRINTS) || defaultState(DEFAULT_SPRINTS),
   );
+  const latestStateRef = useRef(state);
   const themeMode = state.theme || "light";
   const themeVars = THEME_VARS[themeMode] || THEME_VARS.light;
   const [aiStatus, setAIStatus] = useState({
@@ -3431,13 +3706,36 @@ export default function App() {
   const [setupStatus, setSetupStatus] = useState("");
   const [setupLoading, setSetupLoading] = useState(false);
 
+  const showToast = useCallback((msg, err = false) => {
+    setToast({ show: true, msg, err });
+    setTimeout(() => setToast({ show: false, msg: "", err: false }), 6000);
+  }, []);
+
   const persist = useCallback((patchOrUpdater) => {
     setState((prev) => {
       const next = mergeState(prev, patchOrUpdater, DEFAULT_SPRINTS);
-      saveState(next);
-      return next;
+      return saveState(next);
     });
   }, []);
+
+  useEffect(() => {
+    latestStateRef.current = state;
+  }, [state]);
+
+  const syncLatestSavedState = useCallback((notify = false) => {
+    const loaded = loadState(DEFAULT_SPRINTS);
+    if (!loaded) return;
+
+    const currentSavedAt = Number(latestStateRef.current?.savedAt) || 0;
+    const loadedSavedAt = Number(loaded.savedAt) || 0;
+
+    if (loadedSavedAt <= currentSavedAt) return;
+
+    setState(loaded);
+    if (notify) {
+      showToast("Loaded the latest saved dashboard data.");
+    }
+  }, [showToast]);
 
   useEffect(() => {
     setAIStatus((prev) => ({
@@ -3445,6 +3743,31 @@ export default function App() {
       fallback: syncProviderStatus(prev.fallback, !!state.cerebrasKey),
     }));
   }, [state.groqKey, state.cerebrasKey]);
+
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (!event || event.key == null || event.key === STORE_KEY) {
+        syncLatestSavedState(true);
+      }
+    };
+
+    const handleFocus = () => syncLatestSavedState(false);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        syncLatestSavedState(false);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [syncLatestSavedState]);
 
   const activeSprint =
     state.sprints.find((s) => s.num === state.activeSprint) || state.sprints[0];
@@ -3458,6 +3781,7 @@ export default function App() {
   const reviewPromptContext =
     (state.reviewPromptContext || {})[state.activeSprint] || {};
   const isReference = curMeeting === "reference";
+  const isSetup = curMeeting === "setup";
   const meeting = SPECIAL_VIEWS[curMeeting] || MEETINGS[curMeeting] || MEETINGS["standup"];
   const meetingRovoPrompt =
     typeof meeting.rovoPrompt === "function"
@@ -3483,18 +3807,13 @@ export default function App() {
       : curMeeting === "planning"
         ? `Paste the sprint planning discussion for ${nextSprint?.name || "the upcoming sprint"}`
       : meeting.notesLabel;
-  const mData = isReference ? {} : getMeetingData(state, state.activeSprint, curMeeting);
+  const mData = isReference || isSetup ? {} : getMeetingData(state, state.activeSprint, curMeeting);
   const canClearCurrentMeeting =
-    !isReference && (!!rovoPaste.trim() || !!notesPaste.trim() || hasMeetingContent(mData));
+    !isReference && !isSetup && (!!rovoPaste.trim() || !!notesPaste.trim() || hasMeetingContent(mData));
   const showConnectionTip =
     typeof window !== "undefined" &&
     window.location.protocol === "file:" &&
     !state.connectionTipDismissed;
-
-  const showToast = (msg, err = false) => {
-    setToast({ show: true, msg, err });
-    setTimeout(() => setToast({ show: false, msg: "", err: false }), 6000);
-  };
 
   const setThemeMode = (mode) => {
     if (mode === themeMode) return;
@@ -3520,7 +3839,7 @@ export default function App() {
     setRovoSt("");
     setNotesSt("");
     showToast(`${meeting.label} cleared for ${sprintLabel}.`);
-  }, [activeSprint, curMeeting, meeting.label, persist, state.activeSprint]);
+  }, [activeSprint, curMeeting, meeting.label, persist, showToast, state.activeSprint]);
 
   const copyProjectSetupPrompt = useCallback(() => {
     navigator.clipboard.writeText(projectSetupPrompt).then(() => {
@@ -3528,7 +3847,7 @@ export default function App() {
     }, () => {
       showToast("Project setup prompt could not be copied.", true);
     });
-  }, [projectSetupPrompt]);
+  }, [projectSetupPrompt, showToast]);
 
   const updateReviewPromptContext = useCallback(
     (patchOrUpdater) => {
@@ -3571,7 +3890,7 @@ export default function App() {
       },
     }));
     showToast(`Sprint ${sprint.num} snapshot archived.`);
-  }, [persist]);
+  }, [persist, showToast]);
 
   const endSprint = useCallback((sprint) => {
     if (!sprint) return;
@@ -3606,7 +3925,7 @@ export default function App() {
         ? `Sprint ${sprint.num} archived. Switched to ${movedToLabel || `Sprint ${movedTo}`}.`
         : `Sprint ${sprint.num} archived.`,
     );
-  }, [persist]);
+  }, [persist, showToast]);
 
   const runProviderTest = useCallback(async () => {
     const groq = document.getElementById("groq-key")?.value.trim() || "";
@@ -3654,7 +3973,7 @@ export default function App() {
       });
       showToast(e.message, true);
     }
-  }, []);
+  }, [showToast]);
 
   const applyProjectSetup = useCallback(async () => {
     if (!setupPaste.trim()) {
@@ -3720,7 +4039,6 @@ export default function App() {
       setRovoSt("");
       setNotesSt("");
       setSetupPaste("");
-      setModal(null);
       const setupTicketCount = countSetupTickets(parsed);
       const setupEpicCount = countSetupEpics(parsed);
       const seededSummary =
@@ -3743,7 +4061,7 @@ export default function App() {
       showToast(e.message, true);
     }
     setSetupLoading(false);
-  }, [persist, projectProfile, setupPaste, state]);
+  }, [persist, projectProfile, setupPaste, showToast, state]);
 
   const applyParsed = useCallback(
     (parsed, source) => {
@@ -3870,8 +4188,7 @@ export default function App() {
           },
         ];
         next.meetingData = { ...next.meetingData, [key]: d };
-        saveState(next);
-        return next;
+        return saveState(next);
       });
 
       setFresh(newFresh);
@@ -3945,7 +4262,7 @@ export default function App() {
       }
       setLoad(false);
     },
-    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persist, applyParsed, projectContext.epic, projectContext.epicName, projectProfile],
+    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persist, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, showToast],
   );
 
   const switchMeeting = (id) => {
@@ -3955,6 +4272,9 @@ export default function App() {
     setNotes("");
     setRovoSt("");
     setNotesSt("");
+    if (id !== "setup") {
+      setSetupStatus("");
+    }
   };
 
   const apiLabel = () => {
@@ -4016,39 +4336,45 @@ export default function App() {
   ];
 
   const isInsights = curMeeting === "insights";
-  const workspaceAvailable = !isReference && (meeting.useRovo || meeting.useNotes);
-  const currentPageTitle = isInsights
-    ? "Velocity & insights"
-    : curMeeting === "reference"
-      ? "Sprint detail dashboard"
-      : curMeeting === "refinement"
-        ? "Refinement dashboard"
-        : curMeeting === "planning"
-          ? "Sprint planning dashboard"
-          : `${meeting.label} dashboard`;
-  const currentPageSubtitle = isInsights
-    ? "Review recent sprint performance, current commitment, and coaching signals in one place."
+  const workspaceAvailable = !isReference && !isSetup && (meeting.useRovo || meeting.useNotes);
+  const currentPageTitle = isSetup
+    ? "Project setup"
+    : isInsights
+      ? "Velocity & insights"
+      : curMeeting === "reference"
+        ? "Sprint detail dashboard"
+        : curMeeting === "refinement"
+          ? "Refinement dashboard"
+          : curMeeting === "planning"
+            ? "Sprint planning dashboard"
+            : `${meeting.label} dashboard`;
+  const currentPageSubtitle = isSetup
+    ? "Set up the dashboard once here, then use the ceremony pages for focused working updates. This page keeps the setup prompt, instructions, and response box together."
+    : isInsights
+      ? "Review recent sprint performance, current commitment, and coaching signals in one place."
+      : isReference
+        ? "A simplified sprint snapshot that rolls the key current-sprint context into a single view."
+        : workspaceAvailable
+          ? "Capture the latest ceremony context and review the dashboard without splitting the page into separate editor and output columns."
+          : "Review the latest sprint context and supporting notes in a calmer, content-first layout.";
+  const captureSourceLabel = isSetup
+    ? "Setup prompt"
     : isReference
-      ? "A simplified sprint snapshot that rolls the key current-sprint context into a single view."
-      : workspaceAvailable
-        ? "Capture the latest ceremony context and review the dashboard without splitting the page into separate editor and output columns."
-        : "Review the latest sprint context and supporting notes in a calmer, content-first layout.";
-  const captureSourceLabel = isReference
-    ? "Reference only"
-    : meeting.useRovo && meeting.useNotes
-      ? "Rovo + meeting notes"
-      : meeting.useRovo
-        ? "Rovo only"
-        : meeting.useNotes
-          ? "Meeting notes"
-          : "Dashboard only";
+      ? "Reference only"
+      : meeting.useRovo && meeting.useNotes
+        ? "Rovo + meeting notes"
+        : meeting.useRovo
+          ? "Rovo only"
+          : meeting.useNotes
+            ? "Meeting notes"
+            : "Dashboard only";
   const shellBackground = themeMode === "light"
     ? "#f6f8fc"
     : "radial-gradient(circle at top left, rgba(20,25,34,0.98), rgba(11,15,22,0.94) 42%, rgba(7,10,15,0.98) 100%)";
   const frameBackground = themeMode === "light"
     ? "#f6f8fc"
     : "rgba(10,14,20,0.72)";
-  const pageEyebrow = isInsights ? "Performance view" : "Sprint workspace";
+  const pageEyebrow = isSetup ? "Setup page" : isInsights ? "Performance view" : "Sprint workspace";
   const statusCardHint = state.lastUpdated
     ? `Updated ${state.lastUpdated}`
     : "No updates captured yet";
@@ -4119,8 +4445,8 @@ export default function App() {
 
           <div style={{ marginTop: "18px" }}>
             <ShellButton
-              onClick={() => setModal("project-setup")}
-              tone="primary"
+              onClick={() => switchMeeting("setup")}
+              tone={isSetup ? "primary" : "neutral"}
               style={{ width: "100%", textAlign: "left", padding: "13px 14px" }}
             >
               Project setup
@@ -4306,12 +4632,20 @@ export default function App() {
               </div>
 
               <div className="app-page-actions">
-                <ShellButton onClick={() => setModal("history")}>
-                  History
-                </ShellButton>
-                <ShellButton onClick={() => endSprint(activeSprint)} tone="warning">
-                  End sprint
-                </ShellButton>
+                {isSetup ? (
+                  <ShellButton onClick={() => setModal("api")}>
+                    API keys
+                  </ShellButton>
+                ) : (
+                  <>
+                    <ShellButton onClick={() => setModal("history")}>
+                      History
+                    </ShellButton>
+                    <ShellButton onClick={() => endSprint(activeSprint)} tone="warning">
+                      End sprint
+                    </ShellButton>
+                  </>
+                )}
                 <div
                   style={{
                     display: "flex",
@@ -4367,70 +4701,84 @@ export default function App() {
               </div>
             )}
 
-            <QuickStartGuide
-              isReference={isReference}
-              isInsights={isInsights}
-              workspaceAvailable={workspaceAvailable}
-              meetingLabel={meeting.label}
-              captureSourceLabel={captureSourceLabel}
-              onProjectSetup={() => setModal("project-setup")}
-              onOpenReference={() => switchMeeting("reference")}
-            />
+            {!isSetup && (
+              <>
+                <div className="app-filter-grid">
+                  <SummaryFilterCard
+                    label="Sprint"
+                    value={activeSprint ? activeSprint.name : "No sprint"}
+                    hint={activeSprint ? `${activeSprint.start} to ${activeSprint.end}` : "Open project setup to seed sprint context"}
+                    accent={C.amber}
+                    onClick={() => setModal("sprints")}
+                  />
+                  <SummaryFilterCard
+                    label="Epic"
+                    value={projectContext.epic || projectProfile.projectKey}
+                    hint={projectContext.epicName || projectProfile.projectName}
+                    accent={C.blue}
+                    onClick={() => switchMeeting("setup")}
+                  />
+                  <SummaryFilterCard
+                    label="Capture"
+                    value={captureSourceLabel}
+                    hint={statusCardHint}
+                    accent={apiDot()}
+                  />
+                  <SummaryFilterCard
+                    label="Last updated"
+                    value={state.lastUpdated || "No saved updates yet"}
+                    hint="Latest saved dashboard data across browser tabs"
+                    accent={state.lastUpdated ? C.green : C.text2}
+                  />
+                </div>
 
-            <div className="app-filter-grid">
-              <SummaryFilterCard
-                label="Sprint"
-                value={activeSprint ? activeSprint.name : "No sprint"}
-                hint={activeSprint ? `${activeSprint.start} to ${activeSprint.end}` : "Open project setup to seed sprint context"}
-                accent={C.amber}
-                onClick={() => setModal("sprints")}
-              />
-              <SummaryFilterCard
-                label="Epic"
-                value={projectContext.epic || projectProfile.projectKey}
-                hint={projectContext.epicName || projectProfile.projectName}
-                accent={C.blue}
-                onClick={() => setModal("project-setup")}
-              />
-              <SummaryFilterCard
-                label="Capture"
-                value={captureSourceLabel}
-                hint={statusCardHint}
-                accent={apiDot()}
-              />
-            </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      fontSize: "12px",
+                      padding: "10px 14px",
+                      borderRadius: "999px",
+                      border: `1px solid ${C.bd}`,
+                      color: C.text0,
+                      background: C.bg2,
+                      boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.04)}`,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "50%",
+                        background: apiDot(),
+                        flexShrink: 0,
+                      }}
+                    />
+                    {apiLabel()}
+                  </div>
+                  <ProviderStatusChip name="Groq 70B" info={aiStatus.primary} />
+                  <ProviderStatusChip name="Cerebras Llama 3.1 8B" info={aiStatus.fallback} />
+                </div>
+              </>
+            )}
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "12px",
-                  padding: "10px 14px",
-                  borderRadius: "999px",
-                  border: `1px solid ${C.bd}`,
-                  color: C.text0,
-                  background: C.bg2,
-                  boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.04)}`,
-                }}
-              >
-                <span
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    background: apiDot(),
-                    flexShrink: 0,
-                  }}
-                />
-                {apiLabel()}
-              </div>
-              <ProviderStatusChip name="Groq 70B" info={aiStatus.primary} />
-              <ProviderStatusChip name="Cerebras Llama 3.1 8B" info={aiStatus.fallback} />
-            </div>
-
-            {isInsights ? (
+            {isSetup ? (
+              <ProjectSetupPage
+                projectProfile={projectProfile}
+                projectContext={projectContext}
+                projectSetupPrompt={projectSetupPrompt}
+                setupPaste={setupPaste}
+                setSetupPaste={setSetupPaste}
+                setupStatus={setupStatus}
+                setupLoading={setupLoading}
+                state={state}
+                copyProjectSetupPrompt={copyProjectSetupPrompt}
+                applyProjectSetup={applyProjectSetup}
+                onOpenReference={() => switchMeeting("reference")}
+              />
+            ) : isInsights ? (
               <Insights
                 state={state}
                 persist={persist}
@@ -4579,204 +4927,6 @@ export default function App() {
           </div>
         </section>
       </div>
-
-      {/* Project Setup Modal */}
-      {modal === "project-setup" && (
-        <Modal onClose={() => setModal(null)}>
-          <div
-            style={{
-              fontSize: "15px",
-              fontWeight: "600",
-              marginBottom: "10px",
-            }}
-          >
-            Project setup
-          </div>
-          <div style={{ fontSize: "12px", color: C.text1, lineHeight: "1.65", marginBottom: "14px" }}>
-            Use one setup prompt to gather everything the board needs for first-time setup or a same-project refresh: project profile, sprint cadence, active sprint, upcoming sprints, all epics in play, the active sprint team, and the current stories/tasks grouped by status. Paste the Rovo response here and the dashboard will adapt itself.
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "8px",
-              marginBottom: "14px",
-            }}
-          >
-            {[
-              `Current project: ${projectProfile.projectKey} — ${projectProfile.projectName}`,
-              `Primary epic: ${projectContext.epic}${projectContext.epicName ? ` — ${projectContext.epicName}` : ""}`,
-              `Sprint naming: ${projectProfile.sprintNameTemplate}`,
-              projectProfile.sprintDurationDays
-                ? `Sprint cadence: ${projectProfile.sprintDurationDays}-day sprint${projectProfile.sprintGapDays >= 0 ? ` · ${projectProfile.sprintGapDays} gap day${projectProfile.sprintGapDays === 1 ? "" : "s"}` : ""}`
-                : null,
-              projectProfile.team?.length ? `Team members known: ${projectProfile.team.length}` : null,
-              projectProfile.workstreams?.length ? `Known workstreams: ${projectProfile.workstreams.length}` : null,
-              state.projectSetupAppliedAt
-                ? `Last setup: ${new Date(state.projectSetupAppliedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}`
-                : "No setup applied yet",
-            ].filter(Boolean).map((chip) => (
-              <span
-                key={chip}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: "999px",
-                  background: C.bg3,
-                  border: `1px solid ${C.bd}`,
-                  fontSize: "11px",
-                  color: C.text1,
-                }}
-              >
-                {chip}
-              </span>
-            ))}
-          </div>
-          <div
-            style={{
-              border: `1px solid ${C.bd2}`,
-              borderRadius: "10px",
-              overflow: "hidden",
-              background: C.bg0,
-              marginBottom: "12px",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                padding: "10px 14px",
-                background: C.bg3,
-                borderBottom: `1px solid ${C.bd}`,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "12px", fontWeight: "700", color: C.text0 }}>
-                  Rovo project setup prompt
-                </div>
-                <div style={{ fontSize: "11px", color: C.text2 }}>
-                  One prompt to gather the adaptive project profile, sprint cadence, current scrum-board team, and active sprint board in one response.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={copyProjectSetupPrompt}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: C.blue,
-                  color: "#fff",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                }}
-              >
-                Copy prompt
-              </button>
-            </div>
-            <div
-              style={{
-                maxHeight: "180px",
-                overflowY: "auto",
-                padding: "12px 14px",
-                fontSize: "12px",
-                lineHeight: "1.6",
-                color: C.text0,
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {projectSetupPrompt}
-            </div>
-          </div>
-          <label
-            style={{
-              fontSize: "11px",
-              fontWeight: "600",
-              color: C.text1,
-              display: "block",
-              marginBottom: "6px",
-            }}
-          >
-            Paste the Rovo setup response
-          </label>
-          <textarea
-            value={setupPaste}
-            onChange={(e) => setSetupPaste(e.target.value)}
-            placeholder="Paste the project setup response here..."
-            style={{
-              width: "100%",
-              minHeight: "180px",
-              fontSize: "12px",
-              padding: "10px 12px",
-              border: `1px solid ${C.bd2}`,
-              borderRadius: "8px",
-              background: C.bg0,
-              color: C.text0,
-              resize: "vertical",
-              fontFamily: "inherit",
-              lineHeight: "1.6",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-          <div style={{ fontSize: "11px", color: C.text2, marginTop: "6px", lineHeight: "1.5" }}>
-            Applying setup updates the project profile, sprint cadence, sprint list, current team, and active sprint board. Rerunning setup for the same project refreshes that context without wiping saved sprint data. Switching to a different project clears old meeting data, history, and insights while keeping API keys, theme, and Jira base URL.
-          </div>
-          {setupStatus && (
-            <div
-              style={{
-                marginTop: "12px",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                fontSize: "11px",
-                lineHeight: "1.5",
-                background: /error/i.test(setupStatus) ? C.redBg : C.blueBg,
-                color: /error|cancelled/i.test(setupStatus) ? "#f87171" : "#93c5fd",
-                border: `1px solid ${/error|cancelled/i.test(setupStatus) ? C.red : C.blue}`,
-              }}
-            >
-              {setupStatus}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
-            <button
-              type="button"
-              onClick={applyProjectSetup}
-              disabled={setupLoading}
-              style={{
-                fontSize: "12px",
-                padding: "8px 16px",
-                border: "none",
-                borderRadius: "6px",
-                background: C.blue,
-                color: "#fff",
-                cursor: setupLoading ? "default" : "pointer",
-                fontWeight: "700",
-                opacity: setupLoading ? 0.6 : 1,
-              }}
-            >
-              {setupLoading ? "Applying..." : "Apply setup"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setModal(null)}
-              style={{
-                fontSize: "12px",
-                padding: "8px 16px",
-                border: `1px solid ${C.bd}`,
-                borderRadius: "6px",
-                background: "transparent",
-                color: C.text1,
-                cursor: "pointer",
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </Modal>
-      )}
 
       {/* API Modal */}
       {modal === "api" && (

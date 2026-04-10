@@ -5,7 +5,7 @@ import { MEETINGS } from './config';
 import { buildRovoMasterPrompt } from './features/sprint-review/promptTemplates/rovoMasterPrompt';
 import { buildPptFormatPrompt } from './features/sprint-review/promptTemplates/pptFormatPrompt';
 import { buildProjectSetupPrompt } from './projectProfile';
-import { applyProjectSetupState, defaultState } from './store';
+import { applyProjectSetupState, defaultState, STORE_KEY } from './store';
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -23,13 +23,55 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.getByRole('button', { name: /^Project setup$/i })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Sprint detail$/i })).toBeInTheDocument();
   expect(screen.getByText(/^Refinement$/i)).toBeInTheDocument();
-  expect(screen.getByText(/Start here/i)).toBeInTheDocument();
-  expect(screen.getByText(/What this product does and how to use it/i)).toBeInTheDocument();
+  expect(screen.queryByText(/Start here/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/What this product does and how to use it/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
   expect(screen.getByText(/^Groq 70B$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Cerebras Llama 3.1 8B$/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Dark$/i })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Light$/i })).toBeInTheDocument();
+});
+
+test('project setup is a dedicated page with instructions and the setup prompt', async () => {
+  render(<App />);
+
+  await userEvent.click(screen.getByRole('button', { name: /^Project setup$/i }));
+
+  expect(screen.getByText(/Setup page/i)).toBeInTheDocument();
+  expect(screen.getByText(/What this product does and how to use it/i)).toBeInTheDocument();
+  expect(screen.getByText(/Project setup prompt/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Copy setup prompt$/i })).toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/Paste the project setup response here/i)).toBeInTheDocument();
+});
+
+test('reflects the latest saved dashboard data from another browser instance', async () => {
+  const initial = {
+    ...defaultState([{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14' }]),
+    lastUpdated: '09/04/2026 09:00',
+    savedAt: 100,
+  };
+  window.localStorage.setItem(STORE_KEY, JSON.stringify(initial));
+
+  render(<App />);
+
+  expect(screen.getByText('09/04/2026 09:00')).toBeInTheDocument();
+
+  const newer = {
+    ...initial,
+    lastUpdated: '10/04/2026 15:45',
+    savedAt: 200,
+  };
+  window.localStorage.setItem(STORE_KEY, JSON.stringify(newer));
+
+  await act(async () => {
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: STORE_KEY,
+      newValue: JSON.stringify(newer),
+    }));
+  });
+
+  expect(screen.getByText('10/04/2026 15:45')).toBeInTheDocument();
+  expect(screen.getByText(/Loaded the latest saved dashboard data/i)).toBeInTheDocument();
 });
 
 test('uses page-level scrolling instead of a locked viewport shell', () => {

@@ -7,7 +7,7 @@ import {
 } from './projectProfile';
 
 // ─── Local storage state management ──────────────────────────────────────────
-const STORE_KEY = 'scrum_intelligence_v8';
+export const STORE_KEY = 'scrum_intelligence_v8';
 const LEGACY_STORE_KEYS = ['rpab_v8'];
 
 function textValue(value) {
@@ -288,6 +288,7 @@ export function hydrateState(rawState, defaultSprints) {
     projectSetupAppliedAt: rawState.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(rawState.projectSetupNotes) ? rawState.projectSetupNotes : base.projectSetupNotes,
     lastUpdated: rawState.lastUpdated || null,
+    savedAt: Number.isFinite(Number(rawState.savedAt)) ? Number(rawState.savedAt) : null,
   };
 }
 
@@ -323,7 +324,7 @@ export function loadState(defaultSprints) {
       const raw = localStorage.getItem(legacyKey);
       if (!raw) continue;
       const hydrated = hydrateState(JSON.parse(raw), defaultSprints);
-      localStorage.setItem(STORE_KEY, JSON.stringify(hydrated));
+      saveState(hydrated);
       localStorage.removeItem(legacyKey);
       return hydrated;
     }
@@ -336,9 +337,15 @@ export function loadState(defaultSprints) {
 
 export function saveState(state) {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    const next = {
+      ...state,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(STORE_KEY, JSON.stringify(next));
+    return next;
   } catch (e) {
     console.error('Save failed:', e);
+    return state;
   }
 }
 
@@ -367,6 +374,7 @@ export function defaultState(defaultSprints) {
     projectSetupAppliedAt: null,
     projectSetupNotes: [],
     lastUpdated: null,
+    savedAt: null,
   };
 }
 
