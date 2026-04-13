@@ -26,9 +26,10 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.queryByText(/Start here/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/What this product does and how to use it/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/^Groq 70B$/i)).toBeInTheDocument();
-  expect(screen.getByText(/^OpenRouter$/i)).toBeInTheDocument();
-  expect(screen.getByText(/^Cerebras Llama 3.1 8B$/i)).toBeInTheDocument();
+  expect(screen.getByText(/^Gemma 4 31B$/i)).toBeInTheDocument();
+  expect(screen.getByText(/^Llama 3\.3 70B$/i)).toBeInTheDocument();
+  expect(screen.getByText(/^Qwen 3 Coder$/i)).toBeInTheDocument();
+  expect(screen.getByText(/^Free Router$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Shared sync$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Local only$/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Dark$/i })).toBeInTheDocument();
@@ -200,8 +201,6 @@ test('migrates legacy rpab local storage into the scrum-intelligence store key',
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
-      cerebrasKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -230,7 +229,6 @@ test('copy prompt uses current sprint and epic context automatically', async () 
         epic: 'RPAB-88',
         epicName: 'Student Intake Automation',
       },
-      groqKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -246,14 +244,26 @@ test('copy prompt uses current sprint and epic context automatically', async () 
   expect(await screen.findByText(/Copied/i)).toBeInTheDocument();
 
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-    expect.stringContaining('PROJECT: RPAB | PROJECT NAME: Student Intake Automation | SPRINT: 5'),
+    expect.stringContaining('- Project key: RPAB'),
   );
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-    expect.stringContaining('RPAB-88 | Student Intake Automation | RPAB Sprint 5'),
+    expect.stringContaining('- Project name: Student Intake Automation'),
+  );
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect.stringContaining('- Primary epic: RPAB-88 | Student Intake Automation'),
+  );
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect.stringContaining('Current sprint: RPAB Sprint 5 | Sprint 5 | 2026-04-16 to 2026-04-29'),
+  );
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect.stringContaining('Sprint cadence: 14 day sprint | 0 gap days'),
+  );
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect.stringContaining('Return JSON in exactly this shape'),
   );
 });
 
-test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', async () => {
+test('uses Jira Rovo for standup, planning ceremonies, review, retro, and insights while keeping notes capture available', async () => {
   window.localStorage.setItem(
     STORE_KEY,
     JSON.stringify({
@@ -281,7 +291,7 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
 
   expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Copy Rovo Prompt/i })).toBeInTheDocument();
-  expect(screen.getByPlaceholderText(/Paste the Rovo response here/i)).toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i)).toBeInTheDocument();
   expect(screen.getByPlaceholderText(/Paste meeting notes, transcript, or summary here/i)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Open input/i })).not.toBeInTheDocument();
 
@@ -290,7 +300,8 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
   expect(screen.getByText(/single source reference/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/^Refinement$/i));
-  expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Copy Rovo Prompt/i })).toBeInTheDocument();
   expect(screen.getByText(/Refinement workspace \/ meeting notes/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Upcoming sprint — RPAB Sprint 5/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Paste the refinement discussion for RPAB Sprint 5/i)).toBeInTheDocument();
@@ -301,15 +312,22 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
   expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/Sprint planning/i));
-  expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Copy Rovo Prompt/i })).toBeInTheDocument();
   expect(screen.getByText(/Sprint planning \/ meeting notes/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Upcoming sprint — RPAB Sprint 5/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Paste the sprint planning discussion for RPAB Sprint 5/i)).toBeInTheDocument();
   expect(screen.getByText(/Sprint planning dashboard/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/Sprint review/i));
-  expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Copy Rovo Prompt/i })).toBeInTheDocument();
   expect(screen.getByText(/Paste transcript or sprint review notes/i)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByText(/Retrospective/i));
+  expect(screen.getByText(/Jira Rovo Chat/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Copy Rovo Prompt/i })).toBeInTheDocument();
+  expect(screen.getByText(/Paste transcript or retro notes/i)).toBeInTheDocument();
 
   await userEvent.click(screen.getByText(/RPA discovery call/i));
   expect(screen.queryByText(/Jira Rovo Chat/i)).not.toBeInTheDocument();
@@ -320,9 +338,134 @@ test('uses Jira Rovo only for standup and insights, and Hedy-only elsewhere', as
   expect(screen.getByText(/Paste transcript or stakeholder update notes/i)).toBeInTheDocument();
 });
 
+test('daily standup applies valid Rovo JSON directly without requiring an API key', async () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState([
+        { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true },
+      ]),
+      activeSprint: 4,
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-27',
+        epicName: 'UK Prospect Data Cleansing Automation',
+      },
+    }),
+  );
+
+  render(<App />);
+
+  const payload = {
+    context: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-27',
+      epicName: 'UK Prospect Data Cleansing Automation',
+      sprintName: 'RPAB Sprint 4',
+    },
+    metrics: { done: 1, inprog: 1, inreview: 0, blocked: 1, todo: 0, backlog: 0, health: 'at risk' },
+    ticketsDone: [
+      { ticket: 'RPAB-96', summary: 'Performer State Machine', assignee: 'Todd Slaughter', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
+    ticketsInProgress: [
+      { ticket: 'RPAB-57', summary: 'UAT test data provided by the business', assignee: 'Marion Raji', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
+    ticketsInReview: [],
+    ticketsBlocked: [
+      { ticket: 'RPAB-98', summary: 'Understand how to interact with Jira', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
+    ticketsTodo: [],
+    staleInProgress: [],
+    notPickedUp: [],
+    blockers: [
+      { title: 'Jira interaction approach unresolved', detail: 'Need API vs GUI decision.', ticketId: 'RPAB-98', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
+    actions: [
+      { focus: 'Confirm Jira interaction approach', owner: 'Nick Baumer', why: 'Main sprint blocker', urgency: 'today', ticketId: 'RPAB-98', detail: 'Confirm API vs GUI approach.' },
+    ],
+    nextSteps: [
+      { step: 'Get the Jira approach agreed', owner: 'Team', timing: 'today', why: 'Unblock delivery', detail: 'Decision needed before more implementation.' },
+    ],
+    decisions: [],
+    risks: [
+      { risk: 'UAT may slip if Jira approach stays unresolved', level: 'medium', mitigation: 'Agree the approach this week' },
+    ],
+    questions: [
+      { target: 'Nick Baumer', question: 'Can we confirm API vs GUI now?', why: 'RPAB-98 is blocking the sprint', needed: 'Decision and next implementation step' },
+    ],
+    notes: ['Sprint is still sensitive to the Jira integration decision.'],
+    summary: 'Standup: Jira interaction remains the main sprint risk.',
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getAllByRole('button', { name: /Update dashboard/i })[0]);
+
+  await waitFor(() => {
+    const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
+    expect(saved.meetingData['4_standup'].summary).toBe('Standup: Jira interaction remains the main sprint risk.');
+    expect(saved.meetingData['4_standup'].ticketsBlocked[0].ticket).toBe('RPAB-98');
+    expect(saved.meetingData['4_standup'].actions[0].focus).toBe('Confirm Jira interaction approach');
+  });
+});
+
+test('velocity and insights applies valid Rovo JSON directly without requiring an API key', async () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState([
+        { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true },
+        { num: 5, name: 'RPAB Sprint 5', start: '2026-04-15', end: '2026-04-28', active: false },
+      ]),
+      activeSprint: 4,
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-27',
+        epicName: 'UK Prospect Data Cleansing Automation',
+      },
+    }),
+  );
+
+  render(<App />);
+  await userEvent.click(screen.getByText(/Velocity & insights/i));
+
+  const payload = {
+    context: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-27',
+      epicName: 'UK Prospect Data Cleansing Automation',
+      sprintName: 'RPAB Sprint 4',
+    },
+    sprints: [
+      { num: 2, name: 'RPAB Sprint 2', committedPoints: 43, completedPoints: 35, committedTickets: 10, completedTickets: 8 },
+      { num: 3, name: 'RPAB Sprint 3', committedPoints: 40, completedPoints: 31, committedTickets: 9, completedTickets: 7 },
+    ],
+    current: { num: 4, name: 'RPAB Sprint 4', committedPoints: 38, completedPoints: 10, committedTickets: 8, completedTickets: 3 },
+    insights: ['Carry-over remains visible across consecutive sprints.'],
+    recommendation: 'Protect focus on the Jira integration blocker before adding more scope.',
+    summary: 'Velocity is viable but still sensitive to blocked carry-over.',
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+
+  await waitFor(() => {
+    const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
+    expect(saved.velocityData.summary).toBe('Velocity is viable but still sensitive to blocked carry-over.');
+    expect(saved.velocityData.current.num).toBe(4);
+    expect(saved.velocityData.insights[0]).toMatch(/Carry-over remains visible/i);
+  });
+});
+
 test('planning Hedy updates replace the current planning snapshot instead of stacking duplicates', () => {
   const policy = meetingMergePolicy('planning', 'Meeting notes');
   const refinementPolicy = meetingMergePolicy('refinement', 'Meeting notes');
+  const planningRovoPolicy = meetingMergePolicy('planning', 'Rovo/Jira');
+  const reviewRovoPolicy = meetingMergePolicy('review', 'Rovo/Jira');
+  const retroRovoPolicy = meetingMergePolicy('retro', 'Rovo/Jira');
 
   expect(policy.overwriteFields).toEqual(
     expect.arrayContaining([
@@ -340,6 +483,139 @@ test('planning Hedy updates replace the current planning snapshot instead of sta
   );
   expect(policy.appendFields).not.toEqual(expect.arrayContaining(['carryForward', 'actions', 'decisions', 'notes']));
   expect(refinementPolicy.overwriteFields).toEqual(expect.arrayContaining(['carryForward', 'actions', 'decisions', 'notes']));
+  expect(planningRovoPolicy.overwriteFields).toEqual(expect.arrayContaining(['carryForward', 'backlog', 'dependencies', 'actions', 'decisions', 'notes']));
+  expect(planningRovoPolicy.appendFields).not.toEqual(expect.arrayContaining(['carryForward', 'backlog', 'dependencies']));
+  expect(reviewRovoPolicy.overwriteFields).toEqual(expect.arrayContaining(['completed', 'incomplete', 'stakeholderFeedback', 'actions', 'decisions', 'notes']));
+  expect(retroRovoPolicy.overwriteFields).toEqual(expect.arrayContaining(['wentWell', 'didntGoWell', 'actions', 'notes']));
+});
+
+test('planning applies valid Rovo JSON directly without requiring an API key', async () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState([
+        { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true },
+        { num: 5, name: 'RPAB Sprint 5', start: '2026-04-16', end: '2026-04-29', active: false },
+      ]),
+      activeSprint: 4,
+      openrouterKey: '',
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'Student Intake Automation',
+        primaryEpic: 'RPAB-88',
+        primaryEpicName: 'Student Intake Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        sprintDurationDays: 14,
+        sprintGapDays: 1,
+      },
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-88',
+        epicName: 'Student Intake Automation',
+      },
+    }),
+  );
+
+  render(<App />);
+  await userEvent.click(screen.getByText(/Sprint planning/i));
+
+  const payload = {
+    context: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-88',
+      epicName: 'Student Intake Automation',
+      sprintName: 'RPAB Sprint 5',
+    },
+    carryForward: [
+      {
+        ticketId: 'RPAB-98',
+        summary: 'Understand how to interact with Jira',
+        reason: 'Needs final API-vs-GUI decision',
+        assignee: 'Nick Baumer',
+        recommendation: 'carry to next sprint',
+      },
+    ],
+    backlog: [
+      {
+        ticketId: 'RPAB-107',
+        summary: 'UCAS input validation follow-up',
+        priority: 'high',
+        ready: true,
+        notes: 'Selected for Sprint 5 with UAT focus',
+      },
+    ],
+    dependencies: [
+      {
+        dependency: 'Business to confirm final UAT file set',
+        owner: 'Marion Raji',
+        status: 'open',
+        risk: 'Sprint 5 start could slip',
+        detail: 'Need confirmation before day 2',
+      },
+    ],
+    teamLoad: [
+      {
+        name: 'Todd Slaughter',
+        tickets: 'RPAB-107 and Jira follow-up',
+        capacity: 'limited',
+      },
+    ],
+    sprintRecommendation: [
+      {
+        ticketId: 'RPAB-107',
+        summary: 'UCAS input validation follow-up',
+        rationale: 'Protects UAT-readiness scope',
+      },
+    ],
+    actions: [
+      {
+        focus: 'Confirm Sprint 5 UAT dependency owners',
+        owner: 'Ali Khan',
+        why: 'Protects the Sprint 5 start',
+        urgency: 'today',
+        ticketId: 'RPAB-98',
+        detail: 'Lock owners and due dates after planning',
+      },
+    ],
+    decisions: [
+      {
+        decision: 'RPAB-98 carries into Sprint 5',
+        madeBy: 'RPA team',
+        impact: 'Keeps Jira integration visible in planned scope',
+        detail: 'Do not close until interaction approach is confirmed',
+      },
+    ],
+    risks: [
+      {
+        risk: 'UAT dependency may slow Sprint 5 start',
+        level: 'medium',
+        mitigation: 'Confirm file-set timing in the first two days',
+      },
+    ],
+    questions: [
+      {
+        target: 'Marion Raji',
+        question: 'When will the final UAT file set be available?',
+        why: 'Planning assumed early Sprint 5 readiness',
+        needed: 'Confirmed date and file location',
+      },
+    ],
+    notes: ['Sprint 5 plan stays viable if the UAT dependency lands early.'],
+    summary: 'Sprint 5 plan is broadly ready but depends on early UAT confirmation.',
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getAllByRole('button', { name: /^Update dashboard$/i })[0]);
+
+  await waitFor(() => {
+    const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
+    expect(saved.meetingData['4_planning'].summary).toBe('Sprint 5 plan is broadly ready but depends on early UAT confirmation.');
+    expect(saved.meetingData['4_planning'].carryForward[0].ticketId).toBe('RPAB-98');
+    expect(saved.meetingData['4_planning'].backlog[0].ticketId).toBe('RPAB-107');
+    expect(saved.meetingData['4_planning'].decisions[0].decision).toMatch(/carries into Sprint 5/i);
+  });
 });
 
 test('refinement dashboard surfaces upcoming-sprint context, detail, and notes', async () => {
@@ -420,8 +696,6 @@ test('refinement dashboard surfaces upcoming-sprint context, detail, and notes',
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
-      cerebrasKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -495,8 +769,6 @@ test('sprint reference rolls up summaries and key insight from other tabs', asyn
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
-      cerebrasKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -662,7 +934,6 @@ test('supports multi-select status filters and keeps blocked wording consistent'
         },
       },
       sprintSummaries: {},
-      groqKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -750,7 +1021,6 @@ test('renders contextual questions and follow-ups clearly', () => {
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -888,8 +1158,6 @@ test('standup dashboard surfaces transcript actions, next steps, decisions, and 
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
-      cerebrasKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -995,7 +1263,6 @@ test('renders standup notes as a deduped briefing instead of repeated raw bullet
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -1063,7 +1330,6 @@ test('uses current status arrays as source of truth when blocked text is inaccur
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -1110,8 +1376,6 @@ test('sprint review keeps Hedy intelligence separate from deck-prep slides', asy
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: '',
-      cerebrasKey: '',
       jiraBase: '',
       apiProvider: 'none',
       connectionTipDismissed: false,
@@ -1128,7 +1392,7 @@ test('sprint review keeps Hedy intelligence separate from deck-prep slides', asy
   expect(screen.queryByText(/Old slide bullet that should no longer appear/i)).not.toBeInTheDocument();
 });
 
-test('clear data preserves saved api key and jira base', async () => {
+test('clear data preserves the saved OpenRouter key and jira base', async () => {
   const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
   window.localStorage.setItem(
@@ -1166,12 +1430,9 @@ test('clear data preserves saved api key and jira base', async () => {
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: 'gsk_test_key',
       openrouterKey: 'sk-or_test_key',
-      openrouterModel: 'google/gemma-4-31b-it:free',
-      cerebrasKey: 'csk_test_key',
       jiraBase: 'https://example.atlassian.net/browse',
-      apiProvider: 'groq',
+      apiProvider: 'openrouter',
       connectionTipDismissed: true,
       lastUpdated: '07/04/2026 10:00',
       velocityData: { summary: 'Old summary' },
@@ -1183,10 +1444,7 @@ test('clear data preserves saved api key and jira base', async () => {
   await userEvent.click(screen.getByRole('button', { name: /Clear data/i }));
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
-  expect(saved.groqKey).toBe('gsk_test_key');
   expect(saved.openrouterKey).toBe('sk-or_test_key');
-  expect(saved.openrouterModel).toBe('google/gemma-4-31b-it:free');
-  expect(saved.cerebrasKey).toBe('csk_test_key');
   expect(saved.jiraBase).toBe('https://example.atlassian.net/browse');
   expect(saved.meetingData).toEqual({});
   expect(saved.sprintSummaries).toEqual({});
@@ -1258,10 +1516,9 @@ test('clear this tab removes only the current meeting data for the active sprint
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: 'gsk_test_key',
-      cerebrasKey: 'csk_test_key',
+      openrouterKey: 'sk-or_test_key',
       jiraBase: '',
-      apiProvider: 'groq',
+      apiProvider: 'openrouter',
       connectionTipDismissed: true,
       lastUpdated: '07/04/2026 10:00',
     }),
@@ -1318,10 +1575,9 @@ test('regular settings changes do not wipe meeting data', async () => {
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: 'gsk_test_key',
-      cerebrasKey: 'csk_test_key',
+      openrouterKey: 'sk-or_test_key',
       jiraBase: 'https://example.atlassian.net/browse',
-      apiProvider: 'groq',
+      apiProvider: 'openrouter',
       connectionTipDismissed: false,
       lastUpdated: '07/04/2026 10:00',
     }),
@@ -1430,7 +1686,7 @@ test('default setup prompt stays generic before any project is configured', () =
   expect(prompt).not.toContain('UK Prospect Data Cleansing Automation');
 });
 
-test('project setup fallback parser stays more compact for Cerebras retries', () => {
+test('project setup fallback parser stays more compact for OpenRouter retries', () => {
   expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT.length).toBeLessThan(PROJECT_SETUP_SYSTEM_PROMPT.length);
   expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('Max counts');
   expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('Return ONLY compact JSON');
@@ -1466,10 +1722,8 @@ test('applying project setup can switch the dashboard to a new project profile',
       },
     },
     sprintSummaries: { 4: { label: 'Old sprint' } },
-    groqKey: 'gsk_test',
     openrouterKey: 'sk-or_test',
-    openrouterModel: 'google/gemma-4-31b-it:free',
-    cerebrasKey: 'csk_test',
+    apiProvider: 'openrouter',
     theme: 'light',
   };
 
@@ -1555,10 +1809,8 @@ test('applying project setup can switch the dashboard to a new project profile',
   expect(next.meetingData['7_standup'].ticketsBlocked.map((item) => item.ticket)).toEqual(['ABC-101']);
   expect(next.meetingData['7_standup'].actions[0].focus).toBe('Chase the admissions API token');
   expect(next.sprintSummaries).toEqual({});
-  expect(next.groqKey).toBe('gsk_test');
   expect(next.openrouterKey).toBe('sk-or_test');
-  expect(next.openrouterModel).toBe('google/gemma-4-31b-it:free');
-  expect(next.cerebrasKey).toBe('csk_test');
+  expect(next.apiProvider).toBe('openrouter');
   expect(next.theme).toBe('light');
   expect(next.projectSetupAppliedAt).toBeTruthy();
 });
@@ -1778,9 +2030,77 @@ test('standup Rovo prompt includes watch-ticket priority context', () => {
     nextSprint: { num: 5, name: 'RPAB Sprint 5' },
   });
 
-  expect(prompt).toContain('WATCH TICKETS / PRIORITY ITEMS');
+  expect(prompt).toContain('- Watch tickets: RPAB-101 | RPAB-205');
   expect(prompt).toContain('RPAB-101 | RPAB-205');
   expect(prompt).toContain('make sure their current Jira status is reflected accurately');
+});
+
+test('refinement and planning Rovo prompts include inferred target sprint dates and strict JSON contracts', () => {
+  const args = {
+    projectContext: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-27',
+      epicName: 'Automation Rollout',
+    },
+    projectProfile: {
+      projectKey: 'RPAB',
+      projectName: 'Automation Rollout',
+      primaryEpic: 'RPAB-27',
+      primaryEpicName: 'Automation Rollout',
+      sprintDurationDays: 14,
+      sprintGapDays: 1,
+      watchTickets: ['RPAB-101'],
+      workstreams: [{ epic: 'RPAB-27', epicName: 'Automation Rollout', focus: 'UAT readiness' }],
+    },
+    sprint: { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14' },
+    nextSprint: { num: 5, name: 'RPAB Sprint 5' },
+  };
+
+  const refinementPrompt = MEETINGS.refinement.rovoPrompt(args);
+  const planningPrompt = MEETINGS.planning.rovoPrompt(args);
+
+  expect(refinementPrompt).toContain('Target sprint for refinement: RPAB Sprint 5 | 2026-04-16 to 2026-04-29');
+  expect(refinementPrompt).toContain('"carryForward"');
+  expect(refinementPrompt).toContain('"teamLoad"');
+  expect(refinementPrompt).toContain('"sprintRecommendation"');
+  expect(planningPrompt).toContain('Planned sprint: RPAB Sprint 5 | 2026-04-16 to 2026-04-29');
+  expect(planningPrompt).toContain('"backlog"');
+  expect(planningPrompt).toContain('"decisions"');
+  expect(planningPrompt).toContain('Focus on selected scope, carry-over, dependencies, and delivery confidence');
+});
+
+test('review and retro Rovo prompts return direct-dashboard JSON shapes', () => {
+  const args = {
+    projectContext: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-27',
+      epicName: 'Automation Rollout',
+    },
+    projectProfile: {
+      projectKey: 'RPAB',
+      projectName: 'Automation Rollout',
+      primaryEpic: 'RPAB-27',
+      primaryEpicName: 'Automation Rollout',
+      sprintDurationDays: 14,
+      sprintGapDays: 1,
+      watchTickets: ['RPAB-98'],
+      workstreams: [{ epic: 'RPAB-27', epicName: 'Automation Rollout', focus: 'UAT readiness' }],
+    },
+    sprint: { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14' },
+    nextSprint: { num: 5, name: 'RPAB Sprint 5' },
+  };
+
+  const reviewPrompt = MEETINGS.review.rovoPrompt(args);
+  const retroPrompt = MEETINGS.retro.rovoPrompt(args);
+
+  expect(reviewPrompt).toContain('Sprint under review: RPAB Sprint 4 | Sprint 4 | 2026-04-01 to 2026-04-14');
+  expect(reviewPrompt).toContain('"sprintGoal"');
+  expect(reviewPrompt).toContain('"stakeholderFeedback"');
+  expect(reviewPrompt).toContain('Do not produce deck bullets, presentation wording, or invented business benefits');
+  expect(retroPrompt).toContain('Sprint in retro: RPAB Sprint 4 | Sprint 4 | 2026-04-01 to 2026-04-14');
+  expect(retroPrompt).toContain('"wentWell"');
+  expect(retroPrompt).toContain('"didntGoWell"');
+  expect(retroPrompt).toContain('Do not guess or invent team sentiment');
 });
 
 test('archived sprint history stores meeting and velocity insights for later reference', async () => {
@@ -1859,10 +2179,9 @@ test('archived sprint history stores meeting and velocity insights for later ref
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
-      groqKey: 'gsk_test_key',
-      cerebrasKey: 'csk_test_key',
+      openrouterKey: 'sk-or_test_key',
       jiraBase: '',
-      apiProvider: 'groq',
+      apiProvider: 'openrouter',
       connectionTipDismissed: false,
       lastUpdated: '07/04/2026 10:00',
       velocityData: {

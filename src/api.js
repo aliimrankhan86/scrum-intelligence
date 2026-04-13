@@ -1,409 +1,323 @@
-// ─── AI Providers: Groq primary + OpenRouter + Cerebras fallback ─────────────
+// ─── AI Routing: OpenRouter free-tier model chain ────────────────────────────
 
 import {
-  CEREBRAS_PROVIDER,
-  GROQ_PROVIDER,
-  OPENROUTER_PROVIDER,
-  resolveOpenRouterModelId,
+  OPENROUTER_MODEL_CHAIN,
 } from './aiProviders';
 
-const OPENROUTER_MAX_TOKENS = 2200;
-const CEREBRAS_MAX_TOKENS = 2200;
+const OPENROUTER_MAX_COMPLETION_TOKENS = 2200;
+const OPENROUTER_RATE_LIMIT_BACKOFF_MS = 10000;
+const configuredOrigin = (process.env.REACT_APP_SYNC_SERVER_ORIGIN || '').trim().replace(/\/+$/, '');
+export const OPENROUTER_PROXY_ENDPOINT = configuredOrigin
+  ? `${configuredOrigin}/api/openrouter/chat`
+  : '/api/openrouter/chat';
 
-function noKeyStatus(label) {
-  return { state: 'no_key', detail: `No ${label} key saved` };
+function noKeyStatus() {
+  return { state: 'no_key', detail: 'No OpenRouter key saved' };
 }
 
-function buildProviderStates(keys) {
-  const openrouterModel = resolveOpenRouterModelId(keys?.openrouterModel);
-  return {
-    groq: keys?.groqKey
-      ? { state: 'ready', detail: 'Primary Groq model ready to use' }
-      : noKeyStatus(GROQ_PROVIDER.label),
-    openrouter: keys?.openrouterKey
-      ? { state: 'ready', detail: `OpenRouter ready with ${openrouterModel}` }
-      : noKeyStatus(OPENROUTER_PROVIDER.label),
-    cerebras: keys?.cerebrasKey
-      ? { state: 'ready', detail: 'Cerebras fallback model ready to use' }
-      : noKeyStatus(CEREBRAS_PROVIDER.label),
-  };
+function buildModelStates(hasKey) {
+  return Object.fromEntries(
+    OPENROUTER_MODEL_CHAIN.map((model) => [
+      model.key,
+      hasKey
+        ? { state: 'ready', detail: `${model.label} ready through OpenRouter` }
+        : noKeyStatus(),
+    ]),
+  );
 }
 
-function nextAvailableProviderLabel(keys, currentProvider) {
-  const checks = [
-    currentProvider === 'groq' && keys?.openrouterKey ? OPENROUTER_PROVIDER.label : '',
-    currentProvider !== 'cerebras' && keys?.cerebrasKey ? CEREBRAS_PROVIDER.label : '',
-  ].filter(Boolean);
-  return checks[0] || '';
+function emitModelStates(onStatusChange, currentStates, provider, msg, patch = {}) {
+  const nextStates = { ...currentStates, ...patch };
+  onStatusChange?.(provider, msg, nextStates);
+  return nextStates;
+}
+
+function modelStatePatch(activeKey, activeState, otherStateBuilder) {
+  return Object.fromEntries(
+    OPENROUTER_MODEL_CHAIN.map((model) => [
+      model.key,
+      model.key === activeKey
+        ? activeState
+        : otherStateBuilder(model),
+    ]),
+  );
+}
+
+function isRetryableOpenRouterFailure(error) {
+  const status = Number(error?.status);
+  return status === 429 || status === 404;
+}
+
+function buildSkippedTestResult(reason) {
+  return { ok: false, configured: true, skipped: true, detail: reason };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 export async function callAI(systemPrompt, userContent, keys, onStatusChange, options = {}) {
-  const { groqKey, openrouterKey, openrouterModel, cerebrasKey } = keys;
-  const resolvedOpenRouterModel = resolveOpenRouterModelId(openrouterModel);
-  const groqMaxTokens = Number.isFinite(Number(options?.groqMaxTokens))
-    ? Number(options.groqMaxTokens)
-    : 1500;
-  const openrouterMaxTokens = Number.isFinite(Number(options?.openrouterMaxTokens))
+  const { openrouterKey } = keys || {};
+  const maxCompletionTokens = Number.isFinite(Number(options?.openrouterMaxTokens))
     ? Number(options.openrouterMaxTokens)
-    : OPENROUTER_MAX_TOKENS;
-  const cerebrasMaxTokens = Number.isFinite(Number(options?.cerebrasMaxTokens))
-    ? Number(options.cerebrasMaxTokens)
-    : CEREBRAS_MAX_TOKENS;
-  const emit = (provider, msg, providers) => onStatusChange?.(provider, msg, providers);
+    : Number.isFinite(Number(options?.maxCompletionTokens))
+      ? Number(options.maxCompletionTokens)
+      : OPENROUTER_MAX_COMPLETION_TOKENS;
+  const rateLimitBackoffMs = Number.isFinite(Number(options?.rateLimitBackoffMs))
+    ? Number(options.rateLimitBackoffMs)
+    : OPENROUTER_RATE_LIMIT_BACKOFF_MS;
+  const sleep = typeof options?.sleep === 'function' ? options.sleep : wait;
+
+  if (!openrouterKey) {
+    throw new Error('No OpenRouter API key configured — click ⚙ API keys');
+  }
+
   const errors = [];
-  let providerStates = buildProviderStates(keys);
+  let modelStates = buildModelStates(true);
 
-  const emitWithStates = (provider, msg, patch = {}) => {
-    providerStates = { ...providerStates, ...patch };
-    emit(provider, msg, providerStates);
-  };
+  for (let index = 0; index < OPENROUTER_MODEL_CHAIN.length; index += 1) {
+    const model = OPENROUTER_MODEL_CHAIN[index];
+    const nextModel = OPENROUTER_MODEL_CHAIN[index + 1] || null;
 
-  if (!groqKey && !openrouterKey && !cerebrasKey) {
-    throw new Error('No API keys configured — click ⚙ API keys');
-  }
+    modelStates = emitModelStates(
+      onStatusChange,
+      modelStates,
+      index === 0 ? 'processing' : 'fallback',
+      index === 0
+        ? `Contacting ${model.label} via OpenRouter...`
+        : `Retrying with ${model.label} via OpenRouter...`,
+      modelStatePatch(
+        model.key,
+        { state: 'working', detail: `Sending request to ${model.id}` },
+        () => nextModel
+          ? { state: 'standby', detail: `Waiting in case ${model.label} fails` }
+          : { state: 'standby', detail: 'Waiting for the active OpenRouter route' },
+      ),
+    );
 
-  if (groqKey) {
     try {
-      emitWithStates('processing', `Contacting ${GROQ_PROVIDER.chipLabel}...`, {
-        groq: { state: 'working', detail: `Sending request to ${GROQ_PROVIDER.modelId}` },
-        openrouter: openrouterKey
-          ? { state: 'standby', detail: `Waiting in case ${GROQ_PROVIDER.chipLabel} fails` }
-          : noKeyStatus(OPENROUTER_PROVIDER.label),
-        cerebras: cerebrasKey
-          ? { state: 'standby', detail: 'Waiting for earlier providers in the fallback chain' }
-          : noKeyStatus(CEREBRAS_PROVIDER.label),
-      });
-
-      const raw = await requestGroqChat({
-        groqKey,
-        model: GROQ_PROVIDER.modelId,
-        systemPrompt,
-        userContent,
-        maxTokens: groqMaxTokens,
-      });
-      if (!raw) throw new Error(`${GROQ_PROVIDER.modelId} returned empty response`);
-      const parsed = parseJSON(raw);
-      emitWithStates('groq', `Powered by ${GROQ_PROVIDER.label}`, {
-        groq: { state: 'active', detail: `Response received from ${GROQ_PROVIDER.chipLabel}` },
-        openrouter: openrouterKey
-          ? { state: 'standby', detail: 'Fallback provider was not needed' }
-          : noKeyStatus(OPENROUTER_PROVIDER.label),
-        cerebras: cerebrasKey
-          ? { state: 'standby', detail: 'Fallback provider was not needed' }
-          : noKeyStatus(CEREBRAS_PROVIDER.label),
-      });
-      return parsed;
-    } catch (e) {
-      const nextLabel = nextAvailableProviderLabel(keys, 'groq');
-      errors.push(`${GROQ_PROVIDER.chipLabel} unavailable: ${e.message}`);
-      if (nextLabel) {
-        emitWithStates(
-          'fallback',
-          e.status === 429
-            ? `${GROQ_PROVIDER.chipLabel} rate limited — trying ${nextLabel}...`
-            : `${GROQ_PROVIDER.chipLabel} failed — trying ${nextLabel}...`,
-          {
-            groq: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-            openrouter: openrouterKey
-              ? {
-                  state: 'working',
-                  detail: `Sending request to ${resolvedOpenRouterModel}`,
-                }
-              : providerStates.openrouter,
-            cerebras: !openrouterKey && cerebrasKey
-              ? { state: 'working', detail: `Sending request to ${CEREBRAS_PROVIDER.modelId}` }
-              : providerStates.cerebras,
-          },
-        );
-      } else {
-        providerStates = {
-          ...providerStates,
-          groq: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-        };
-      }
-    }
-  }
-
-  if (openrouterKey) {
-    try {
-      if (!groqKey) {
-        emitWithStates('processing', `Contacting ${OPENROUTER_PROVIDER.label}...`, {
-          groq: noKeyStatus(GROQ_PROVIDER.label),
-          openrouter: { state: 'working', detail: `Sending request to ${resolvedOpenRouterModel}` },
-          cerebras: cerebrasKey
-            ? { state: 'standby', detail: 'Waiting in case OpenRouter fails' }
-            : noKeyStatus(CEREBRAS_PROVIDER.label),
-        });
-      }
-
       const raw = await requestOpenRouterChat({
         openrouterKey,
-        model: resolvedOpenRouterModel,
+        modelId: model.id,
         systemPrompt,
         userContent,
-        maxTokens: openrouterMaxTokens,
+        maxCompletionTokens,
       });
-      if (!raw) throw new Error(`${resolvedOpenRouterModel} returned empty response`);
+      if (!raw) throw new Error(`${model.id} returned empty response`);
       const parsed = parseJSON(raw);
-      emitWithStates(
-        'openrouter',
-        groqKey
-          ? `${GROQ_PROVIDER.label} unavailable — using ${OPENROUTER_PROVIDER.label}`
-          : `Powered by ${OPENROUTER_PROVIDER.label}`,
-        {
-          openrouter: { state: 'active', detail: `Response received from ${resolvedOpenRouterModel}` },
-          cerebras: cerebrasKey
-            ? { state: 'standby', detail: 'Fallback provider was not needed' }
-            : noKeyStatus(CEREBRAS_PROVIDER.label),
-        },
+      modelStates = emitModelStates(
+        onStatusChange,
+        modelStates,
+        model.key,
+        `Powered by OpenRouter · ${model.label}`,
+        modelStatePatch(
+          model.key,
+          { state: 'active', detail: `Response received from ${model.id}` },
+          () => ({ state: 'standby', detail: 'Route available if needed' }),
+        ),
       );
       return parsed;
-    } catch (e) {
-      errors.push(`${OPENROUTER_PROVIDER.label} unavailable: ${e.message}`);
-      if (cerebrasKey) {
-        emitWithStates(
+    } catch (error) {
+      errors.push(`${model.label} unavailable: ${error.message}`);
+      const retryable = isRetryableOpenRouterFailure(error) && nextModel;
+      const state = error.status === 429 ? 'rate_limited' : error.status === 404 ? 'expired' : 'failed';
+
+      if (retryable) {
+        if (error.status === 429) {
+          modelStates = emitModelStates(
+            onStatusChange,
+            modelStates,
+            'fallback',
+            `${model.label} rate limited — waiting 10s before trying ${nextModel.label}...`,
+            {
+              [model.key]: { state, detail: error.message },
+            },
+          );
+          await sleep(rateLimitBackoffMs);
+          continue;
+        }
+
+        modelStates = emitModelStates(
+          onStatusChange,
+          modelStates,
           'fallback',
-          e.status === 429
-            ? `${OPENROUTER_PROVIDER.label} rate limited — trying ${CEREBRAS_PROVIDER.label}...`
-            : `${OPENROUTER_PROVIDER.label} failed — trying ${CEREBRAS_PROVIDER.label}...`,
+          error.status === 404
+            ? `${model.label} expired or unavailable — trying ${nextModel.label}...`
+            : `${model.label} failed — trying ${nextModel.label}...`,
           {
-            openrouter: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-            cerebras: { state: 'working', detail: `Sending request to ${CEREBRAS_PROVIDER.modelId}` },
+            [model.key]: { state, detail: error.message },
           },
         );
-      } else {
-        providerStates = {
-          ...providerStates,
-          openrouter: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-        };
+        continue;
       }
+
+      modelStates = emitModelStates(
+        onStatusChange,
+        modelStates,
+        'error',
+        'OpenRouter model chain exhausted',
+        {
+          [model.key]: { state, detail: error.message },
+        },
+      );
+      break;
     }
-  }
-
-  if (!cerebrasKey) {
-    emitWithStates('error', `${CEREBRAS_PROVIDER.label} not configured`, {
-      cerebras: noKeyStatus(CEREBRAS_PROVIDER.label),
-    });
-    throw new Error(errors.join(' | ') || 'No Cerebras key saved');
-  }
-
-  try {
-    if (!groqKey && !openrouterKey) {
-      emitWithStates('processing', `Contacting ${CEREBRAS_PROVIDER.chipLabel}...`, {
-        groq: noKeyStatus(GROQ_PROVIDER.label),
-        openrouter: noKeyStatus(OPENROUTER_PROVIDER.label),
-        cerebras: { state: 'working', detail: `Sending request to ${CEREBRAS_PROVIDER.modelId}` },
-      });
-    }
-
-    const raw = await requestCerebrasChat({
-      cerebrasKey,
-      model: CEREBRAS_PROVIDER.modelId,
-      systemPrompt,
-      userContent,
-      maxTokens: cerebrasMaxTokens,
-    });
-    if (!raw) throw new Error(`${CEREBRAS_PROVIDER.modelId} returned empty response`);
-    const parsed = parseJSON(raw);
-    emitWithStates(
-      'cerebras',
-      groqKey || openrouterKey
-        ? 'Earlier providers unavailable — using Cerebras'
-        : `Powered by ${CEREBRAS_PROVIDER.label}`,
-      {
-        cerebras: { state: 'active', detail: `Response received from ${CEREBRAS_PROVIDER.chipLabel}` },
-      },
-    );
-    return parsed;
-  } catch (e) {
-    errors.push(`${CEREBRAS_PROVIDER.chipLabel} unavailable: ${e.message}`);
-    emitWithStates('error', 'No provider responded', {
-      cerebras: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-    });
   }
 
   throw new Error(errors.join(' | '));
 }
 
 export async function testProviders(keys, onStatusChange) {
-  const { groqKey, openrouterKey, openrouterModel, cerebrasKey } = keys;
-  const resolvedOpenRouterModel = resolveOpenRouterModelId(openrouterModel);
-  const emit = (provider, msg, providers) => onStatusChange?.(provider, msg, providers);
-  let providerStates = buildProviderStates(keys);
-  const emitWithStates = (provider, msg, patch = {}) => {
-    providerStates = { ...providerStates, ...patch };
-    emit(provider, msg, providerStates);
-  };
-  const results = {};
-  const testSystem = 'Return only compact JSON.';
-  const testUser = '{"ok":true}';
-
-  if (!groqKey && !openrouterKey && !cerebrasKey) {
-    return {
-      groq: { ok: false, configured: false, error: 'No Groq key saved' },
-      openrouter: { ok: false, configured: false, error: 'No OpenRouter key saved' },
-      cerebras: { ok: false, configured: false, error: 'No Cerebras key saved' },
-    };
-  }
-
-  if (!groqKey) {
-    results.groq = { ok: false, configured: false, error: 'No Groq key saved' };
-    emitWithStates('groq', `${GROQ_PROVIDER.chipLabel} not configured`);
-  } else {
-    try {
-      emitWithStates('processing', `Testing ${GROQ_PROVIDER.chipLabel}...`, {
-        groq: { state: 'working', detail: `Testing ${GROQ_PROVIDER.modelId}` },
-        openrouter: openrouterKey
-          ? { state: 'standby', detail: `Waiting to test ${OPENROUTER_PROVIDER.label}` }
-          : noKeyStatus(OPENROUTER_PROVIDER.label),
-        cerebras: cerebrasKey
-          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_PROVIDER.chipLabel}` }
-          : noKeyStatus(CEREBRAS_PROVIDER.label),
-      });
-      const raw = await requestGroqChat({
-        groqKey,
-        model: GROQ_PROVIDER.modelId,
-        systemPrompt: testSystem,
-        userContent: testUser,
-        maxTokens: 80,
-      });
-      if (!raw) throw new Error(`${GROQ_PROVIDER.modelId} returned empty response`);
-      results.groq = { ok: true, configured: true };
-      emitWithStates('groq', `${GROQ_PROVIDER.chipLabel} test passed`, {
-        groq: { state: 'active', detail: `${GROQ_PROVIDER.chipLabel} test request succeeded` },
-      });
-    } catch (e) {
-      results.groq = { ok: false, configured: true, error: e.message };
-      emitWithStates('groq', `${GROQ_PROVIDER.chipLabel} test failed`, {
-        groq: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-      });
-    }
-  }
+  const { openrouterKey } = keys || {};
+  const results = Object.fromEntries(
+    OPENROUTER_MODEL_CHAIN.map((model) => [
+      model.key,
+      { ok: false, configured: true, skipped: false, error: '' },
+    ]),
+  );
 
   if (!openrouterKey) {
-    results.openrouter = { ok: false, configured: false, error: 'No OpenRouter key saved' };
-    emitWithStates('openrouter', `${OPENROUTER_PROVIDER.label} not configured`);
-  } else {
-    try {
-      emitWithStates('processing', `Testing ${OPENROUTER_PROVIDER.label}...`, {
-        openrouter: { state: 'working', detail: `Testing ${resolvedOpenRouterModel}` },
-        cerebras: cerebrasKey
-          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_PROVIDER.chipLabel}` }
-          : noKeyStatus(CEREBRAS_PROVIDER.label),
-      });
-      const raw = await requestOpenRouterChat({
-        openrouterKey,
-        model: resolvedOpenRouterModel,
-        systemPrompt: testSystem,
-        userContent: testUser,
-        maxTokens: 80,
-      });
-      if (!raw) throw new Error(`${resolvedOpenRouterModel} returned empty response`);
-      results.openrouter = { ok: true, configured: true };
-      emitWithStates('openrouter', `${OPENROUTER_PROVIDER.label} test passed`, {
-        openrouter: { state: 'active', detail: `${OPENROUTER_PROVIDER.label} test request succeeded` },
-      });
-    } catch (e) {
-      results.openrouter = { ok: false, configured: true, error: e.message };
-      emitWithStates('openrouter', `${OPENROUTER_PROVIDER.label} test failed`, {
-        openrouter: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-      });
-    }
+    return Object.fromEntries(
+      OPENROUTER_MODEL_CHAIN.map((model) => [
+        model.key,
+        { ok: false, configured: false, error: 'No OpenRouter key saved' },
+      ]),
+    );
   }
 
-  if (!cerebrasKey) {
-    results.cerebras = { ok: false, configured: false, error: 'No Cerebras key saved' };
-    emitWithStates('cerebras', `${CEREBRAS_PROVIDER.chipLabel} not configured`);
-  } else {
-    try {
-      emitWithStates('processing', `Testing ${CEREBRAS_PROVIDER.chipLabel}...`, {
-        cerebras: { state: 'working', detail: `Testing ${CEREBRAS_PROVIDER.modelId}` },
-      });
-      const raw = await requestCerebrasChat({
-        cerebrasKey,
-        model: CEREBRAS_PROVIDER.modelId,
-        systemPrompt: testSystem,
-        userContent: testUser,
-        maxTokens: 80,
-      });
-      if (!raw) throw new Error(`${CEREBRAS_PROVIDER.modelId} returned empty response`);
-      results.cerebras = { ok: true, configured: true };
-      emitWithStates('cerebras', `${CEREBRAS_PROVIDER.chipLabel} test passed`, {
-        cerebras: { state: 'active', detail: `${CEREBRAS_PROVIDER.chipLabel} test request succeeded` },
-      });
-    } catch (e) {
-      results.cerebras = { ok: false, configured: true, error: e.message };
-      emitWithStates('cerebras', `${CEREBRAS_PROVIDER.chipLabel} test failed`, {
-        cerebras: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-      });
-    }
-  }
+  let modelStates = buildModelStates(true);
+  const testSystem = 'Return only compact JSON.';
+  const testUser = '{"ok":true}';
+  const primaryModel = OPENROUTER_MODEL_CHAIN[0];
+  const safetyModel = OPENROUTER_MODEL_CHAIN[OPENROUTER_MODEL_CHAIN.length - 1];
+  const intermediateModels = OPENROUTER_MODEL_CHAIN.slice(1, -1);
 
-  return results;
-}
-
-async function requestGroqChat({ groqKey, model, systemPrompt, userContent, maxTokens }) {
-  let res;
-  try {
-    res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        temperature: 0.1,
-        max_tokens: maxTokens,
-      }),
+  const markSkipped = (models, reason) => {
+    models.forEach((model) => {
+      results[model.key] = buildSkippedTestResult(reason);
+      modelStates = emitModelStates(
+        onStatusChange,
+        modelStates,
+        model.key,
+        `${model.label} not probed during smoke test`,
+        {
+          [model.key]: { state: 'standby', detail: reason },
+        },
+      );
     });
-  } catch (e) {
-    const requestError = new Error('Groq request did not reach the API. Check browser CORS, network access, or extension settings.');
-    requestError.status = 0;
-    throw requestError;
-  }
+  };
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const requestError = new Error(`Groq ${res.status}: ${err?.error?.message || res.statusText}`);
-    requestError.status = res.status;
-    throw requestError;
-  }
+  const runSingleRouteTest = async (model) => {
+    modelStates = emitModelStates(
+      onStatusChange,
+      modelStates,
+      'processing',
+      `Testing ${model.label} via OpenRouter...`,
+      {
+        [model.key]: { state: 'working', detail: `Testing ${model.id}` },
+      },
+    );
 
-  const data = await res.json();
-  const finishReason = data.choices?.[0]?.finish_reason || data.finish_reason || '';
-  const content = data.choices?.[0]?.message?.content || '';
-  if (finishReason === 'length') {
-    const requestError = new Error('OpenRouter responded, but the JSON was truncated (finish_reason=length).');
-    requestError.status = 200;
-    throw requestError;
+    const raw = await requestOpenRouterChat({
+      openrouterKey,
+      modelId: model.id,
+      systemPrompt: testSystem,
+      userContent: testUser,
+      maxCompletionTokens: 80,
+    });
+    if (!raw) throw new Error(`${model.id} returned empty response`);
+    results[model.key] = { ok: true, configured: true, skipped: false };
+    modelStates = emitModelStates(
+      onStatusChange,
+      modelStates,
+      model.key,
+      `${model.label} test passed`,
+      {
+        [model.key]: { state: 'active', detail: `${model.label} test request succeeded` },
+      },
+    );
+  };
+
+  try {
+    await runSingleRouteTest(primaryModel);
+    markSkipped(
+      OPENROUTER_MODEL_CHAIN.filter((model) => model.key !== primaryModel.key),
+      'Smoke test passed on the primary route. Fallback routes will be checked only if the app needs them.',
+    );
+    return results;
+  } catch (error) {
+    results[primaryModel.key] = { ok: false, configured: true, skipped: false, error: error.message };
+    modelStates = emitModelStates(
+      onStatusChange,
+      modelStates,
+      primaryModel.key,
+      `${primaryModel.label} test failed`,
+      {
+        [primaryModel.key]: {
+          state: error.status === 429 ? 'rate_limited' : error.status === 404 ? 'expired' : 'failed',
+          detail: error.message,
+        },
+      },
+    );
+
+    const retryable = isRetryableOpenRouterFailure(error) && safetyModel && safetyModel.key !== primaryModel.key;
+    if (!retryable) {
+      markSkipped(
+        OPENROUTER_MODEL_CHAIN.filter((model) => model.key !== primaryModel.key),
+        'Smoke test stopped after a non-retryable primary-route failure.',
+      );
+      return results;
+    }
+
+    markSkipped(intermediateModels, 'Skipped in smoke test. These routes are used on demand during live retries.');
+
+    try {
+      await runSingleRouteTest(safetyModel);
+    } catch (safetyError) {
+      results[safetyModel.key] = { ok: false, configured: true, skipped: false, error: safetyError.message };
+      modelStates = emitModelStates(
+        onStatusChange,
+        modelStates,
+        safetyModel.key,
+        `${safetyModel.label} test failed`,
+        {
+          [safetyModel.key]: {
+            state: safetyError.status === 429 ? 'rate_limited' : safetyError.status === 404 ? 'expired' : 'failed',
+            detail: safetyError.message,
+          },
+        },
+      );
+    }
+
+    return results;
   }
-  return content;
 }
 
-async function requestOpenRouterChat({ openrouterKey, model, systemPrompt, userContent, maxTokens }) {
+async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
   let res;
   try {
-    res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    res = await fetch(OPENROUTER_PROXY_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${openrouterKey}`,
-        'X-Title': 'Scrum Intelligence',
+        Accept: 'application/json',
       },
       body: JSON.stringify({
-        model,
+        openrouterKey,
+        model: modelId,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ],
         temperature: 0.1,
-        max_tokens: maxTokens,
+        max_completion_tokens: maxCompletionTokens,
+        response_format: { type: 'json_object' },
       }),
     });
-  } catch (e) {
-    const requestError = new Error('OpenRouter request did not reach the API. Check browser CORS, network access, or the saved key.');
+  } catch (_) {
+    const requestError = new Error('The local OpenRouter proxy did not respond. Ensure the shared server is running and reachable.');
     requestError.status = 0;
     throw requestError;
   }
@@ -421,52 +335,10 @@ async function requestOpenRouterChat({ openrouterKey, model, systemPrompt, userC
   }
 
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
-async function requestCerebrasChat({ cerebrasKey, model, systemPrompt, userContent, maxTokens }) {
-  let res;
-  try {
-    res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cerebrasKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        temperature: 0.1,
-        max_completion_tokens: maxTokens,
-        response_format: { type: 'json_object' },
-      }),
-    });
-  } catch (e) {
-    const requestError = new Error('Cerebras request did not reach the API. Check browser CORS, network access, or the saved key.');
-    requestError.status = 0;
-    throw requestError;
-  }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const detail =
-      err?.error?.message ||
-      err?.message ||
-      (Array.isArray(err?.errors) ? err.errors.join(', ') : '') ||
-      res.statusText;
-    const requestError = new Error(`Cerebras ${res.status}: ${detail}`);
-    requestError.status = res.status;
-    throw requestError;
-  }
-
-  const data = await res.json();
   const finishReason = data.choices?.[0]?.finish_reason || data.finish_reason || '';
   const content = data.choices?.[0]?.message?.content || '';
   if (finishReason === 'length') {
-    const requestError = new Error('Cerebras responded, but the JSON was truncated (finish_reason=length).');
+    const requestError = new Error(`OpenRouter responded, but the JSON was truncated for ${modelId} (finish_reason=length).`);
     requestError.status = 200;
     throw requestError;
   }

@@ -15,10 +15,7 @@ test('splits shared dashboard data from local settings and recomposes them safel
   const fullState = {
     ...defaultState(DEFAULT_SPRINTS),
     theme: 'dark',
-    groqKey: 'groq-secret',
     openrouterKey: 'sk-or-secret',
-    openrouterModel: 'google/gemma-4-31b-it:free',
-    cerebrasKey: 'cerebras-secret',
     jiraBase: 'https://jira.example.com/browse',
     apiProvider: 'openrouter',
     connectionTipDismissed: true,
@@ -40,22 +37,16 @@ test('splits shared dashboard data from local settings and recomposes them safel
 
   expect(localSettings).toEqual({
     theme: 'dark',
-    groqKey: 'groq-secret',
     openrouterKey: 'sk-or-secret',
-    openrouterModel: 'google/gemma-4-31b-it:free',
-    cerebrasKey: 'cerebras-secret',
     jiraBase: 'https://jira.example.com/browse',
     apiProvider: 'openrouter',
     connectionTipDismissed: true,
   });
   expect(sharedState.theme).toBeUndefined();
-  expect(sharedState.groqKey).toBeUndefined();
   expect(sharedState.openrouterKey).toBeUndefined();
   expect(sharedState.remoteRevision).toBeUndefined();
   expect(recomposed.theme).toBe('dark');
-  expect(recomposed.groqKey).toBe('groq-secret');
   expect(recomposed.openrouterKey).toBe('sk-or-secret');
-  expect(recomposed.openrouterModel).toBe('google/gemma-4-31b-it:free');
   expect(recomposed.lastUpdated).toBe('10/04/2026 15:38');
   expect(recomposed.meetingData['4_standup'].summary).toBe('Shared standup snapshot');
 });

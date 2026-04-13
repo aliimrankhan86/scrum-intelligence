@@ -2,7 +2,7 @@ flowchart TD
     subgraph ME["👤 Ali Khan — Senior Scrum Master, RPAB Project"]
         ROLE["UEL · UK Prospect Data Cleansing Automation · Epic RPAB-27
         Sprint cadence: 2 weeks · Current: Sprint 4 (ends 14 Apr 2026)
-        Stack: React app · Gemini primary → Groq fallback · localStorage state"]
+        Stack: React app · OpenRouter free-tier chain · shared sync state"]
     end
 
     subgraph INPUTS["Data Inputs"]
@@ -71,11 +71,15 @@ flowchart TD
     end
 
     subgraph API["API Chain"]
-        G["Gemini 1.5 Flash — primary
-        Free via AI Studio · test: process any paste"]
-        GR["Groq llama-3.1-8b-instant — fallback
-        Free tier · rate limited · auto-triggers if Gemini fails"]
-        G -->|"fails"| GR
+        G["Gemma 4 31B via OpenRouter — primary
+        Default route for parsing and board analysis"]
+        L["Llama 3.3 70B via OpenRouter — fallback
+        Used automatically on 429 or 404"]
+        D["Qwen 3 Coder via OpenRouter — emergency
+        Coding-specialist fallback"]
+        F["OpenRouter Free Router — safety
+        Final free-tier fallback"]
+        G -->|"429 / 404"| L -->|"429 / 404"| D -->|"429 / 404"| F
     end
 
     ROVO -->|"paste into Rovo field"| SD1

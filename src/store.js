@@ -5,7 +5,6 @@ import {
   normaliseProjectProfile,
   normaliseSprints,
 } from './projectProfile';
-import { resolveOpenRouterModelId } from './aiProviders';
 
 // ─── Local storage state management ──────────────────────────────────────────
 export const STORE_KEY = 'scrum_intelligence_v8';
@@ -402,7 +401,6 @@ export function hydrateState(rawState, defaultSprints) {
   const defaultProjectContext = deriveProjectContextFromProfile(projectProfile);
   return {
     ...base,
-    ...rawState,
     sprints: Array.isArray(rawState.sprints) && rawState.sprints.length
       ? rawState.sprints
       : base.sprints,
@@ -422,16 +420,14 @@ export function hydrateState(rawState, defaultSprints) {
       ...defaultProjectContext,
       ...(rawState.projectContext || {}),
     },
-    groqKey: rawState.groqKey || '',
     openrouterKey: rawState.openrouterKey || '',
-    openrouterModel: resolveOpenRouterModelId(rawState.openrouterModel),
-    cerebrasKey: rawState.cerebrasKey || '',
     jiraBase: rawState.jiraBase || '',
-    apiProvider: rawState.apiProvider || 'none',
+    apiProvider: rawState.openrouterKey || rawState.apiProvider === 'openrouter' ? 'openrouter' : 'none',
     connectionTipDismissed: Boolean(rawState.connectionTipDismissed),
     projectSetupAppliedAt: rawState.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(rawState.projectSetupNotes) ? rawState.projectSetupNotes : base.projectSetupNotes,
     lastUpdated: rawState.lastUpdated || null,
+    velocityData: rawState.velocityData,
     savedAt: Number.isFinite(Number(rawState.savedAt)) ? Number(rawState.savedAt) : null,
     remoteRevision: Number.isFinite(Number(rawState.remoteRevision)) ? Number(rawState.remoteRevision) : 0,
     remoteUpdatedAt: Number.isFinite(Number(rawState.remoteUpdatedAt)) ? Number(rawState.remoteUpdatedAt) : null,
@@ -443,10 +439,7 @@ export function extractLocalSettings(rawState, defaultSprints) {
   const state = hydrateState(rawState, defaultSprints);
   return {
     theme: state.theme,
-    groqKey: state.groqKey,
     openrouterKey: state.openrouterKey,
-    openrouterModel: state.openrouterModel,
-    cerebrasKey: state.cerebrasKey,
     jiraBase: state.jiraBase,
     apiProvider: state.apiProvider,
     connectionTipDismissed: state.connectionTipDismissed,
@@ -457,10 +450,7 @@ export function extractSharedDashboardState(rawState, defaultSprints) {
   const state = hydrateState(rawState, defaultSprints);
   const {
     theme,
-    groqKey,
     openrouterKey,
-    openrouterModel,
-    cerebrasKey,
     jiraBase,
     apiProvider,
     connectionTipDismissed,
@@ -587,10 +577,7 @@ export function defaultState(defaultSprints) {
     theme: 'light',
     projectProfile,
     projectContext,
-    groqKey: '',
     openrouterKey: '',
-    openrouterModel: resolveOpenRouterModelId(),
-    cerebrasKey: '',
     jiraBase: '',         // e.g. https://yourorg.atlassian.net/browse
     apiProvider: 'none',
     connectionTipDismissed: false,
@@ -613,11 +600,9 @@ export function clearDashboardData(state, defaultSprints) {
     theme: state.theme || base.theme,
     projectProfile: state.projectProfile || base.projectProfile,
     projectContext: state.projectContext || deriveProjectContextFromProfile(state.projectProfile || base.projectProfile),
-    groqKey: state.groqKey || '',
     openrouterKey: state.openrouterKey || '',
-    openrouterModel: resolveOpenRouterModelId(state.openrouterModel),
-    cerebrasKey: state.cerebrasKey || '',
     jiraBase: state.jiraBase || '',
+    apiProvider: state.openrouterKey ? 'openrouter' : 'none',
     connectionTipDismissed: state.connectionTipDismissed || false,
     projectSetupAppliedAt: state.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(state.projectSetupNotes) ? state.projectSetupNotes : [],

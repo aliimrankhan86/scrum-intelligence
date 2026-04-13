@@ -3,11 +3,9 @@ import "./App.css";
 import { MEETINGS, DEFAULT_SPRINTS } from "./config";
 import { callAI, buildContext, testProviders } from "./api";
 import {
-  AI_PROVIDER_ORDER,
-  CEREBRAS_PROVIDER,
-  GROQ_PROVIDER,
+  OPENROUTER_MODEL_CHAIN,
+  OPENROUTER_MODEL_ORDER,
   OPENROUTER_PROVIDER,
-  resolveOpenRouterModelId,
 } from "./aiProviders";
 import {
   applyProjectSetupState,
@@ -36,6 +34,7 @@ import {
   normaliseProjectProfile,
   PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
   PROJECT_SETUP_SYSTEM_PROMPT,
+  tryParseLooseJsonObject,
   tryParseProjectSetupPayload,
 } from "./projectProfile";
 import {
@@ -74,11 +73,12 @@ const C = {
   tealBg: "var(--app-teal-bg)",
 };
 
-const AI_PROVIDER_META = {
-  groq: { label: GROQ_PROVIDER.label, chipLabel: GROQ_PROVIDER.chipLabel, dot: GROQ_PROVIDER.accent },
-  openrouter: { label: OPENROUTER_PROVIDER.label, chipLabel: OPENROUTER_PROVIDER.chipLabel, dot: OPENROUTER_PROVIDER.accent },
-  cerebras: { label: CEREBRAS_PROVIDER.label, chipLabel: CEREBRAS_PROVIDER.chipLabel, dot: CEREBRAS_PROVIDER.accent },
-};
+const OPENROUTER_MODEL_META = Object.fromEntries(
+  OPENROUTER_MODEL_CHAIN.map((model) => [
+    model.key,
+    { label: model.label, chipLabel: model.label, dot: model.accent, id: model.id },
+  ]),
+);
 
 const THEME_VARS = {
   dark: {
@@ -149,9 +149,19 @@ const AI_STATUS_STYLE = {
   active: { label: "Verified", color: "#4ade80", bg: "rgba(22,163,74,0.12)", border: "#16a34a" },
   standby: { label: "Standby", color: "var(--app-text1)", bg: "var(--app-bg3)", border: "var(--app-bd2)" },
   rate_limited: { label: "Rate limited", color: "#fb923c", bg: "rgba(217,119,6,0.12)", border: "#d97706" },
+  expired: { label: "Expired", color: "#fda4af", bg: "rgba(190,24,93,0.12)", border: "#db2777" },
   failed: { label: "Didn't respond", color: "#f87171", bg: "rgba(220,38,38,0.12)", border: "#dc2626" },
   no_key: { label: "No key", color: "var(--app-text2)", bg: "var(--app-bg3)", border: "var(--app-bd)" },
 };
+
+function buildEmptyAIStatus(detail = "No OpenRouter key saved") {
+  return Object.fromEntries(
+    OPENROUTER_MODEL_ORDER.map((modelKey) => [
+      modelKey,
+      { state: "no_key", detail },
+    ]),
+  );
+}
 
 const DEFAULT_PROJECT_CONTEXT = deriveProjectContextFromProfile(DEFAULT_PROJECT_PROFILE);
 const SPECIAL_VIEWS = {
@@ -214,6 +224,51 @@ function textValue(value) {
 
 function firstValue(...values) {
   return values.map(textValue).find(Boolean) || "";
+}
+
+function isDirectMeetingPayload(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return [
+    "context",
+    "metrics",
+    "ticketsDone",
+    "ticketsInProgress",
+    "ticketsInReview",
+    "ticketsBlocked",
+    "ticketsTodo",
+    "staleInProgress",
+    "notPickedUp",
+    "blockers",
+    "actions",
+    "nextSteps",
+    "decisions",
+    "risks",
+    "questions",
+    "notes",
+    "summary",
+    "carryForward",
+    "backlog",
+    "dependencies",
+    "teamLoad",
+    "sprintRecommendation",
+    "wentWell",
+    "didntGoWell",
+    "openQuestions",
+    "unresolvedDecisions",
+    "stakeholderActions",
+    "achievements",
+    "inProgress",
+    "sprintGoal",
+    "scopeBoundaries",
+    "stakeholderFeedback",
+    "completed",
+    "incomplete",
+  ].some((key) => key in value);
+}
+
+function tryParseDirectMeetingPayload(raw) {
+  const parsed = tryParseLooseJsonObject(raw);
+  return isDirectMeetingPayload(parsed) ? parsed : null;
 }
 
 function dedupeItems(items, getSignature) {
@@ -718,8 +773,12 @@ function sprintLabel(sprint) {
 
 export function meetingMergePolicy(meetingId, source) {
   const isMeetingNotes = source === "Meeting notes" || source === "Notes/Hedy";
+  const isRovoSnapshot = source === "Rovo/Jira";
   const isStandupHedy = meetingId === "standup" && isMeetingNotes;
   const isPlanningHedy = isPlanningLikeView(meetingId) && isMeetingNotes;
+  const isPlanningRovo = isPlanningLikeView(meetingId) && isRovoSnapshot;
+  const isReviewSnapshot = meetingId === "review" && isRovoSnapshot;
+  const isRetroSnapshot = meetingId === "retro" && isRovoSnapshot;
   return {
     allowMetrics: !isStandupHedy,
     allowProjectContext: !isStandupHedy,
@@ -727,7 +786,7 @@ export function meetingMergePolicy(meetingId, source) {
     allowSummaryOverwrite: !isStandupHedy,
     overwriteFields: isStandupHedy
       ? ["actions", "nextSteps", "decisions", "risks", "notes"]
-      : isPlanningHedy
+      : isPlanningHedy || isPlanningRovo
         ? [
             "carryForward",
             "backlog",
@@ -740,6 +799,22 @@ export function meetingMergePolicy(meetingId, source) {
             "questions",
             "notes",
           ]
+        : isReviewSnapshot
+          ? [
+              "completed",
+              "incomplete",
+              "stakeholderFeedback",
+              "actions",
+              "decisions",
+              "notes",
+            ]
+          : isRetroSnapshot
+            ? [
+                "wentWell",
+                "didntGoWell",
+                "actions",
+                "notes",
+              ]
         : [
           "ticketsDone",
           "ticketsInProgress",
@@ -754,7 +829,9 @@ export function meetingMergePolicy(meetingId, source) {
           "nextSteps",
           "notes",
         ],
-    appendFields: isPlanningHedy
+    appendFields: isPlanningRovo || isReviewSnapshot || isRetroSnapshot
+      ? []
+      : isPlanningHedy
       ? [
           "completed",
           "incomplete",
@@ -913,9 +990,9 @@ function buildSprintReferenceData(state, sprintNum) {
 }
 
 function syncProviderStatus(prev, hasKey) {
-  if (!hasKey) return { state: "no_key", detail: "No API key saved" };
+  if (!hasKey) return { state: "no_key", detail: "No OpenRouter key saved" };
   if (!prev || prev.state === "no_key") {
-    return { state: "ready", detail: "Key saved and ready to use" };
+    return { state: "ready", detail: "OpenRouter key saved and ready to use" };
   }
   return prev;
 }
@@ -925,14 +1002,15 @@ function providerStatusHint(info) {
   if (!detail) return "";
   if (/truncated|finish_reason=length|response was cut off/i.test(detail)) return "Truncated";
   if (info?.state === "rate_limited" || /(?:^| )429(?:\b|:)/.test(detail)) return "Rate limit";
-  if (/did not reach|failed to fetch|networkerror|load failed|network request failed|cors/i.test(detail)) {
-    return "Network/CORS";
+  if (/did not reach|failed to fetch|networkerror|load failed|network request failed|proxy|server is running|shared server is running/i.test(detail)) {
+    return "Network/Proxy";
   }
   if (/401|unauthorized|invalid api key|authentication|incorrect api key|forbidden|403/i.test(detail)) {
     return "Auth";
   }
   if (/402|payment required|credit|billing/i.test(detail)) return "Billing";
-  if (/no api key saved/i.test(detail)) return "No key";
+  if (info?.state === "expired" || /(?:^| )404(?:\b|:)|expired|not found/i.test(detail)) return "Expired";
+  if (/no .*key saved/i.test(detail)) return "No key";
   return "";
 }
 
@@ -3003,7 +3081,7 @@ function InputBlock({
         onChange={(e) => onPaste(e.target.value)}
         placeholder={
           pastePlaceholder || (copyText
-            ? "Paste the Rovo response here..."
+            ? "Paste the Rovo JSON response here..."
             : "Paste meeting notes, transcript, or summary here...")
         }
       />
@@ -3456,7 +3534,7 @@ function ProjectSetupPage({
         isInsights={false}
         workspaceAvailable={true}
         meetingLabel="Project setup"
-        captureSourceLabel="Rovo + meeting notes"
+        captureSourceLabel="Rovo JSON"
         onProjectSetup={null}
         onOpenReference={onOpenReference}
       />
@@ -3474,7 +3552,7 @@ function ProjectSetupPage({
           Project setup prompt
         </div>
         <div style={{ fontSize: "13px", color: C.text1, lineHeight: 1.7, marginBottom: "14px" }}>
-          Use this page first when starting a new dashboard or refreshing the same project. Copy the setup prompt, run it in Rovo, then paste the response below so the dashboard can load the right project, sprint timeline, previous sprint context, epic, and team data.
+          Use this page first when starting a new dashboard or refreshing the same project. Copy the setup prompt, run it in Rovo, then paste the JSON response below so the dashboard can load the right project, sprint timeline, previous sprint context, epic, and team data.
         </div>
 
         <div
@@ -3616,7 +3694,7 @@ function ProjectSetupPage({
                 Copy setup prompt
               </div>
               <div style={{ fontSize: "11px", color: C.text2 }}>
-                One prompt to gather the project profile, sprint cadence, sprint history, team, workstreams, and active sprint board in one response.
+                One prompt to gather the project profile, sprint cadence, sprint history, team, workstreams, and active sprint board in one JSON response.
               </div>
             </div>
             <ShellButton onClick={copyProjectSetupPrompt} tone="primary">
@@ -3769,11 +3847,7 @@ export default function App() {
   const sharedSyncPrimedRef = useRef(!sharedSyncEnabledRef.current);
   const themeMode = state.theme || "light";
   const themeVars = THEME_VARS[themeMode] || THEME_VARS.light;
-  const [aiStatus, setAIStatus] = useState({
-    groq: { state: "no_key", detail: "No Groq key saved" },
-    openrouter: { state: "no_key", detail: "No OpenRouter key saved" },
-    cerebras: { state: "no_key", detail: "No Cerebras key saved" },
-  });
+  const [aiStatus, setAIStatus] = useState(() => buildEmptyAIStatus());
   const [curMeeting, setCur] = useState("standup");
   const [rovoPaste, setRovoPaste] = useState("");
   const [notesPaste, setNotes] = useState("");
@@ -4003,12 +4077,13 @@ export default function App() {
   }, [acknowledgeSharedState, applySharedSnapshot, showToast, updateSharedSyncStatus]);
 
   useEffect(() => {
-    setAIStatus((prev) => ({
-      groq: syncProviderStatus(prev.groq, !!state.groqKey),
-      openrouter: syncProviderStatus(prev.openrouter, !!state.openrouterKey),
-      cerebras: syncProviderStatus(prev.cerebras, !!state.cerebrasKey),
-    }));
-  }, [state.groqKey, state.openrouterKey, state.cerebrasKey]);
+    setAIStatus((prev) => Object.fromEntries(
+      OPENROUTER_MODEL_ORDER.map((modelKey) => [
+        modelKey,
+        syncProviderStatus(prev[modelKey], !!state.openrouterKey),
+      ]),
+    ));
+  }, [state.openrouterKey]);
 
   useEffect(() => {
     const handleStorage = (event) => {
@@ -4346,16 +4421,11 @@ export default function App() {
   }, [persist, showToast]);
 
   const runProviderTest = useCallback(async () => {
-    const groq = document.getElementById("groq-key")?.value.trim() || "";
     const openrouter = document.getElementById("openrouter-key")?.value.trim() || "";
-    const openrouterModel = resolveOpenRouterModelId(
-      document.getElementById("openrouter-model")?.value.trim(),
-    );
-    const cerebras = document.getElementById("cerebras-key")?.value.trim() || "";
-    if (!groq && !openrouter && !cerebras) {
+    if (!openrouter) {
       setProviderTestState({
         loading: false,
-        msg: "Add a Groq, OpenRouter, or Cerebras API key before testing.",
+        msg: "Add an OpenRouter API key before testing.",
         err: true,
       });
       return;
@@ -4363,37 +4433,40 @@ export default function App() {
 
     setProviderTestState({
       loading: true,
-      msg: "Testing providers...",
+      msg: "Testing OpenRouter routes...",
       err: false,
     });
 
     try {
       const results = await testProviders(
         {
-          groqKey: groq,
           openrouterKey: openrouter,
-          openrouterModel,
-          cerebrasKey: cerebras,
         },
         (_, __, providers) => {
           if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
         },
       );
 
-      const parts = AI_PROVIDER_ORDER.map((providerId) => {
-        const meta = AI_PROVIDER_META[providerId];
-        const result = results[providerId];
+      const parts = OPENROUTER_MODEL_ORDER.map((modelKey) => {
+        const meta = OPENROUTER_MODEL_META[modelKey];
+        const result = results[modelKey];
         if (!result?.configured) return `${meta.chipLabel} not configured`;
+        if (result?.skipped) return `${meta.chipLabel} standby`;
         if (result.ok) return `${meta.chipLabel} OK`;
         return `${meta.chipLabel} failed: ${result?.error || "Unknown error"}`;
       });
-      const hasError = AI_PROVIDER_ORDER.some((providerId) => {
-        const result = results[providerId];
-        return result?.configured && !result?.ok;
+      const okModels = OPENROUTER_MODEL_ORDER.filter((modelKey) => results[modelKey]?.ok);
+      const hasOperationalRoute = okModels.length > 0;
+      const hasHardError = OPENROUTER_MODEL_ORDER.some((modelKey) => {
+        const result = results[modelKey];
+        return result?.configured && !result?.ok && !result?.skipped;
       });
-      const msg = parts.join(" · ");
-      setProviderTestState({ loading: false, msg, err: hasError });
-      showToast(msg, hasError);
+      const prefix = hasOperationalRoute
+        ? `OpenRouter ready via ${okModels.map((modelKey) => OPENROUTER_MODEL_META[modelKey].chipLabel).join(", ")}`
+        : "OpenRouter test failed";
+      const msg = `${prefix} · ${parts.join(" · ")}`;
+      setProviderTestState({ loading: false, msg, err: !hasOperationalRoute && hasHardError });
+      showToast(msg, !hasOperationalRoute && hasHardError);
     } catch (e) {
       setProviderTestState({
         loading: false,
@@ -4410,7 +4483,7 @@ export default function App() {
       return;
     }
     const directJsonSetup = tryParseProjectSetupPayload(setupPaste);
-    if (!directJsonSetup && !state.groqKey && !state.openrouterKey && !state.cerebrasKey) {
+    if (!directJsonSetup && !state.openrouterKey) {
       setModal("api");
       return;
     }
@@ -4418,12 +4491,12 @@ export default function App() {
     setSetupLoading(true);
     setSetupStatus(directJsonSetup ? "Valid setup JSON detected. Applying directly..." : "Processing project setup...");
     try {
-      let resolvedProvider = directJsonSetup ? "json" : "none";
+      let resolvedModelKey = directJsonSetup ? "json" : "none";
       const onSetupStatus = (provider, msg, providers) => {
         if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-        if (provider === "groq" || provider === "openrouter" || provider === "cerebras") {
-          resolvedProvider = provider;
-          persistLocal({ apiProvider: provider });
+        if (OPENROUTER_MODEL_ORDER.includes(provider)) {
+          resolvedModelKey = provider;
+          persistLocal({ apiProvider: "openrouter" });
         }
         setSetupStatus(msg);
       };
@@ -4437,39 +4510,27 @@ export default function App() {
             PROJECT_SETUP_SYSTEM_PROMPT,
             setupPaste,
             {
-              groqKey: state.groqKey,
               openrouterKey: state.openrouterKey,
-              openrouterModel: state.openrouterModel,
-              cerebrasKey: state.cerebrasKey,
             },
             onSetupStatus,
             {
-              groqMaxTokens: 2600,
               openrouterMaxTokens: 2600,
-              cerebrasMaxTokens: 3200,
             },
           );
         } catch (e) {
-          if (
-            state.cerebrasKey &&
-            /truncated|finish_reason=length|response was cut off/i.test(e.message || "")
-          ) {
-            setSetupStatus("Setup response was too large for the fallback model. Retrying with a compact parser...");
+          if (/truncated|finish_reason=length|response was cut off/i.test(e.message || "")) {
+            setSetupStatus("Setup response was too large for the primary parser. Retrying with a compact setup parser...");
             parsed = await callAI(
               PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
               setupPaste,
               {
-                groqKey: "",
-                openrouterKey: "",
-                openrouterModel: state.openrouterModel,
-                cerebrasKey: state.cerebrasKey,
+                openrouterKey: state.openrouterKey,
               },
               onSetupStatus,
               {
-                cerebrasMaxTokens: 2600,
+                openrouterMaxTokens: 2200,
               },
             );
-            resolvedProvider = "cerebras";
           } else {
             throw e;
           }
@@ -4521,14 +4582,10 @@ export default function App() {
           ? `Seeded ${setupTicketCount} sprint item${setupTicketCount === 1 ? "" : "s"}${setupEpicCount ? ` across ${setupEpicCount} epic${setupEpicCount === 1 ? "" : "s"}` : ""}`
           : "Project profile and sprint structure updated";
       const providerLabel =
-        resolvedProvider === "json"
+        resolvedModelKey === "json"
           ? "Project setup applied from JSON"
-        : resolvedProvider === "groq"
-          ? "Setup applied with Groq"
-          : resolvedProvider === "openrouter"
-            ? "Setup applied with OpenRouter"
-          : resolvedProvider === "cerebras"
-            ? "Setup applied with Cerebras"
+        : OPENROUTER_MODEL_META[resolvedModelKey]
+          ? `Setup applied with ${OPENROUTER_MODEL_META[resolvedModelKey].label} via OpenRouter`
             : "Project setup applied";
       const success = projectChanged
         ? `${providerLabel} · Switched to ${incomingProfile.projectKey || incomingProfile.projectName} · ${seededSummary}`
@@ -4683,63 +4740,65 @@ export default function App() {
       const text = tool === "rovo" ? rovoPaste : notesPaste;
       const setStatus = tool === "rovo" ? setRovoSt : setNotesSt;
       const setLoad = tool === "rovo" ? setRovoL : setNotesL;
+      const directJsonPayload = tool === "rovo" ? tryParseDirectMeetingPayload(text) : null;
 
       if (!text.trim()) {
         setStatus("Paste content above first");
         return;
       }
-      if (!state.groqKey && !state.openrouterKey && !state.cerebrasKey) {
-        setModal("api");
+      if (!directJsonPayload && !state.openrouterKey) {
+        if (tool === "rovo") {
+          setStatus("Paste a valid Rovo JSON response or add an OpenRouter key for AI parsing.");
+        } else {
+          setStatus("Meeting-note parsing requires an OpenRouter key. Rovo board JSON updates still work without one.");
+        }
         return;
       }
 
       setLoad(true);
-      setStatus("Processing...");
+      setStatus(directJsonPayload ? "Valid Rovo JSON detected. Applying directly..." : "Processing...");
       try {
-        let resolvedProvider = "none";
-        const promptTemplate =
-          tool === "notes" && meeting.notesSystemPrompt
-            ? { ...meeting, systemPrompt: meeting.notesSystemPrompt }
-            : meeting;
-        const ctx = buildContext(promptTemplate, activeSprint, {
-          ...projectProfile,
-          epic: projectContext.epic,
-          name: projectContext.epicName || projectProfile.projectName,
-          nextSprint,
-          recentSprintHistory: recentSprintHistoryForAI,
-          lastUpdated: state.lastUpdated,
-        });
-        const parsed = await callAI(
-          ctx,
-          text,
-          {
-            groqKey: state.groqKey,
-            openrouterKey: state.openrouterKey,
-            openrouterModel: state.openrouterModel,
-            cerebrasKey: state.cerebrasKey,
-          },
-          (provider, msg, providers) => {
-            if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-            if (provider === "groq" || provider === "openrouter" || provider === "cerebras") {
-              resolvedProvider = provider;
-              persistLocal({ apiProvider: provider });
-            }
-            setStatus(msg);
-          },
-        );
+        let resolvedModelKey = "none";
+        const parsed = directJsonPayload || await (async () => {
+          const promptTemplate =
+            tool === "notes" && meeting.notesSystemPrompt
+              ? { ...meeting, systemPrompt: meeting.notesSystemPrompt }
+              : meeting;
+          const ctx = buildContext(promptTemplate, activeSprint, {
+            ...projectProfile,
+            epic: projectContext.epic,
+            name: projectContext.epicName || projectProfile.projectName,
+            nextSprint,
+            recentSprintHistory: recentSprintHistoryForAI,
+            lastUpdated: state.lastUpdated,
+          });
+          return callAI(
+            ctx,
+            text,
+            {
+              openrouterKey: state.openrouterKey,
+            },
+            (provider, msg, providers) => {
+              if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
+              if (OPENROUTER_MODEL_ORDER.includes(provider)) {
+                resolvedModelKey = provider;
+                persistLocal({ apiProvider: "openrouter" });
+              }
+              setStatus(msg);
+            },
+          );
+        })();
         const summary = applyParsed(
           parsed,
           tool === "rovo" ? "Rovo/Jira" : "Meeting notes",
         );
         tool === "rovo" ? setRovoPaste("") : setNotes("");
         const providerLabel =
-          resolvedProvider === "groq"
-            ? "Updated with Groq"
-            : resolvedProvider === "openrouter"
-              ? "Updated with OpenRouter"
-            : resolvedProvider === "cerebras"
-              ? "Updated with Cerebras"
-              : "Dashboard updated";
+          directJsonPayload
+            ? "Dashboard updated from Rovo JSON"
+            : OPENROUTER_MODEL_META[resolvedModelKey]
+            ? `Updated with ${OPENROUTER_MODEL_META[resolvedModelKey].label} via OpenRouter`
+            : "Dashboard updated";
         const successMessage = summary
           ? `${providerLabel} · ${summary}`
           : providerLabel;
@@ -4768,27 +4827,27 @@ export default function App() {
   };
 
   const apiLabel = () => {
-    const activeProvider = AI_PROVIDER_ORDER.find((providerId) => aiStatus[providerId]?.state === "active");
-    if (activeProvider) return `Powered by ${AI_PROVIDER_META[activeProvider].label}`;
-    if (AI_PROVIDER_ORDER.some((providerId) => aiStatus[providerId]?.state === "working")) {
-      return "Checking providers";
+    const activeModelKey = OPENROUTER_MODEL_ORDER.find((modelKey) => aiStatus[modelKey]?.state === "active");
+    if (activeModelKey) return `Powered by OpenRouter · ${OPENROUTER_MODEL_META[activeModelKey].label}`;
+    if (OPENROUTER_MODEL_ORDER.some((modelKey) => aiStatus[modelKey]?.state === "working")) {
+      return "Routing with OpenRouter";
     }
-    if (AI_PROVIDER_ORDER.every((providerId) => ["failed", "rate_limited", "no_key"].includes(aiStatus[providerId]?.state))) {
-      return "No provider responded";
+    if (OPENROUTER_MODEL_ORDER.every((modelKey) => ["failed", "rate_limited", "expired", "no_key"].includes(aiStatus[modelKey]?.state))) {
+      return "OpenRouter models exhausted";
     }
-    if (AI_PROVIDER_META[state.apiProvider]) return `Powered by ${AI_PROVIDER_META[state.apiProvider].label}`;
-    return state.groqKey || state.openrouterKey || state.cerebrasKey ? "Keys saved" : "No API key";
+    if (state.apiProvider === "openrouter" || state.openrouterKey) return "OpenRouter ready";
+    return "No API key";
   };
   const apiDot = () => {
-    const activeProvider = AI_PROVIDER_ORDER.find((providerId) => aiStatus[providerId]?.state === "active");
-    if (activeProvider) return AI_PROVIDER_META[activeProvider].dot;
-    if (AI_PROVIDER_ORDER.some((providerId) => aiStatus[providerId]?.state === "working")) {
+    const activeModelKey = OPENROUTER_MODEL_ORDER.find((modelKey) => aiStatus[modelKey]?.state === "active");
+    if (activeModelKey) return OPENROUTER_MODEL_META[activeModelKey].dot;
+    if (OPENROUTER_MODEL_ORDER.some((modelKey) => aiStatus[modelKey]?.state === "working")) {
       return "#fdba74";
     }
-    if (AI_PROVIDER_ORDER.every((providerId) => ["failed", "rate_limited", "no_key"].includes(aiStatus[providerId]?.state))) {
+    if (OPENROUTER_MODEL_ORDER.every((modelKey) => ["failed", "rate_limited", "expired", "no_key"].includes(aiStatus[modelKey]?.state))) {
       return "#f87171";
     }
-    if (AI_PROVIDER_META[state.apiProvider]) return AI_PROVIDER_META[state.apiProvider].dot;
+    if (state.apiProvider === "openrouter" || state.openrouterKey) return OPENROUTER_PROVIDER.accent;
     return C.text2;
   };
 
@@ -5060,7 +5119,7 @@ export default function App() {
                     Connection Tip
                   </span>
                   <span style={{ fontSize: "12px", lineHeight: 1.5 }}>
-                    If data fails to load, ensure your CORS Unblock browser extension is enabled.
+                    Open the app through `npm start` or the shared server URL. File-based launch will bypass the local proxy and OpenRouter requests will fail.
                   </span>
                 </div>
                 <ShellButton
@@ -5270,9 +5329,13 @@ export default function App() {
                     />
                     {apiLabel()}
                   </div>
-                  <ProviderStatusChip name={GROQ_PROVIDER.chipLabel} info={aiStatus.groq} />
-                  <ProviderStatusChip name={OPENROUTER_PROVIDER.chipLabel} info={aiStatus.openrouter} />
-                  <ProviderStatusChip name={CEREBRAS_PROVIDER.chipLabel} info={aiStatus.cerebras} />
+                  {OPENROUTER_MODEL_ORDER.map((modelKey) => (
+                    <ProviderStatusChip
+                      key={modelKey}
+                      name={OPENROUTER_MODEL_META[modelKey].chipLabel}
+                      info={aiStatus[modelKey]}
+                    />
+                  ))}
                 </div>
               </>
             )}
@@ -5341,7 +5404,7 @@ export default function App() {
                           copyLabel="Copy Rovo Prompt"
                           paste={rovoPaste}
                           onPaste={setRovoPaste}
-                          pastePlaceholder="Paste the Rovo response here..."
+                          pastePlaceholder="Paste the Rovo JSON response here..."
                           status={rovoStatus}
                           loading={rovoLoading}
                           onProcess={() => runCapture("rovo")}
@@ -5455,35 +5518,11 @@ export default function App() {
           </div>
           {[
             [
-              "groq-key",
-              "Groq (free-tier friendly)",
-              "gsk_...",
-              "Primary provider. Uses Groq 70B first. Get a free key at console.groq.com.",
-              state.groqKey,
-              "password",
-            ],
-            [
               "openrouter-key",
-              "OpenRouter (Gemma 4 default)",
+              "OpenRouter API key",
               "sk-or-...",
-              "Optional middle fallback. Defaults to Gemma 4 on OpenRouter, and you can change the model below. Get a key from openrouter.ai/keys.",
+              "All completions use OpenRouter. The route is fixed to Gemma 4, then Llama 3.3 70B, then Qwen 3 Coder, then the Free Router. On 429 the app waits 10 seconds before rotating. Get a key from openrouter.ai/keys.",
               state.openrouterKey || "",
-              "password",
-            ],
-            [
-              "openrouter-model",
-              "OpenRouter model ID",
-              OPENROUTER_PROVIDER.defaultModelId,
-              "Default is Gemma 4. Change this if you want another OpenRouter-compatible chat model.",
-              state.openrouterModel || OPENROUTER_PROVIDER.defaultModelId,
-              "text",
-            ],
-            [
-              "cerebras-key",
-              "Cerebras (free hobbyist fallback)",
-              "csk_...",
-              "Final fallback provider. Uses llama3.1-8b on Cerebras free tier. Get a free key from cloud.cerebras.ai.",
-              state.cerebrasKey || "",
               "password",
             ],
             [
@@ -5561,24 +5600,16 @@ export default function App() {
                 fontWeight: "600",
               }}
               onClick={() => {
-                const gr = document.getElementById("groq-key").value.trim();
                 const or = document.getElementById("openrouter-key").value.trim();
-                const orm = resolveOpenRouterModelId(document.getElementById("openrouter-model").value.trim());
-                const ce = document.getElementById("cerebras-key").value.trim();
                 const jira = document.getElementById("jira-base").value.trim().replace(/\/$/, "");
                 setProviderTestState({ loading: false, msg: "", err: false });
-                setAIStatus({
-                  groq: syncProviderStatus(null, !!gr),
-                  openrouter: syncProviderStatus(null, !!or),
-                  cerebras: syncProviderStatus(null, !!ce),
-                });
+                setAIStatus(Object.fromEntries(
+                  OPENROUTER_MODEL_ORDER.map((modelKey) => [modelKey, syncProviderStatus(null, !!or)]),
+                ));
                 persistLocal({
-                  groqKey: gr,
                   openrouterKey: or,
-                  openrouterModel: orm,
-                  cerebrasKey: ce,
                   jiraBase: jira,
-                  apiProvider: gr ? "groq" : or ? "openrouter" : ce ? "cerebras" : "none",
+                  apiProvider: or ? "openrouter" : "none",
                 });
                 setModal(null);
                 setRovoSt("Keys saved — ready");
@@ -5600,7 +5631,7 @@ export default function App() {
               disabled={providerTestState.loading}
               onClick={runProviderTest}
             >
-              {providerTestState.loading ? "Testing..." : "Test providers"}
+              {providerTestState.loading ? "Testing..." : "Test OpenRouter"}
             </button>
             <button
               style={{

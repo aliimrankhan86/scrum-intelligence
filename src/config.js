@@ -36,6 +36,71 @@ function promptSprintNum(sprint) {
   return sprint?.num || 1;
 }
 
+function promptSprintWindow(sprint) {
+  if (!sprint?.start || !sprint?.end) return 'dates not recorded';
+  return `${sprint.start} to ${sprint.end}`;
+}
+
+function promptCadence(projectProfile = PROJECT) {
+  const duration = Number(projectProfile?.sprintDurationDays);
+  const gap = Number(projectProfile?.sprintGapDays);
+  const durationText = Number.isFinite(duration) && duration > 0 ? `${duration} day sprint` : 'sprint duration not recorded';
+  const gapText = Number.isFinite(gap) && gap >= 0 ? `${gap} gap day${gap === 1 ? '' : 's'}` : 'gap not recorded';
+  return `${durationText} | ${gapText}`;
+}
+
+function parseSprintDate(dateText) {
+  if (!dateText) return null;
+  const date = new Date(`${dateText}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatSprintDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function resolveSprintDurationDays(projectProfile = PROJECT, sprint) {
+  const configured = Number(projectProfile?.sprintDurationDays);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  const start = parseSprintDate(sprint?.start);
+  const end = parseSprintDate(sprint?.end);
+  if (!start || !end) return null;
+  return Math.max(1, Math.round((end - start) / 86400000) + 1);
+}
+
+function resolveSprintGapDays(projectProfile = PROJECT) {
+  const configured = Number(projectProfile?.sprintGapDays);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 0;
+}
+
+function inferSprintWindowFromCadence(currentSprint, projectProfile = PROJECT, offset = 1) {
+  const duration = resolveSprintDurationDays(projectProfile, currentSprint);
+  const gap = resolveSprintGapDays(projectProfile);
+  const endDate = parseSprintDate(currentSprint?.end);
+  if (!duration || !endDate) return null;
+
+  const start = new Date(endDate);
+  start.setDate(start.getDate() + (gap + 1) + ((offset - 1) * (duration + gap)));
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + duration - 1);
+
+  return {
+    start: formatSprintDate(start),
+    end: formatSprintDate(end),
+  };
+}
+
+function promptTargetSprintWindow(targetSprint, currentSprint, projectProfile = PROJECT) {
+  if (targetSprint?.start && targetSprint?.end) return promptSprintWindow(targetSprint);
+  const inferred = inferSprintWindowFromCadence(currentSprint, projectProfile);
+  if (inferred?.start && inferred?.end) return `${inferred.start} to ${inferred.end}`;
+  return 'dates not recorded';
+}
+
 function promptNextSprintName(nextSprint, projectProfile = PROJECT, currentSprint) {
   if (nextSprint?.name) return nextSprint.name;
   const nextNum = nextSprint?.num || ((currentSprint?.num || 0) + 1);
@@ -94,6 +159,191 @@ notes = the small set of useful context points the Scrum lead may need later whe
 Do not repeat the same point across actions, decisions, risks, dependencies, and notes unless each field adds different value.
 Ignore humour, filler, and social chat unless it affects delivery, availability, or stakeholder confidence.`;
 
+function buildRefinementRovoPrompt({ projectContext, projectProfile, sprint, nextSprint }) {
+  const targetSprintName = promptNextSprintName(nextSprint, projectProfile, sprint);
+  return `Use live Jira board data, backlog data, active sprint work, linked epics, and any recorded delivery notes for ${promptProjectKey(projectContext, projectProfile)} to prepare refinement intelligence for ${targetSprintName}. Return ONLY valid JSON for the Scrum dashboard. No markdown. No commentary.
+
+This response must be directly usable by the dashboard without extra AI parsing.
+
+Current context
+- Project key: ${promptProjectKey(projectContext, projectProfile)}
+- Project name: ${promptProjectName(projectProfile, projectContext)}
+- Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
+- Current sprint: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Target sprint for refinement: ${targetSprintName} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
+- Sprint cadence: ${promptCadence(projectProfile)}
+- Sprint goal hint: ${promptGoal(projectProfile) || 'not recorded'}
+- Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
+- Watch tickets: ${promptWatchTickets(projectProfile)}
+
+Return JSON in exactly this shape:
+{
+  "context": {
+    "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
+    "epic": "${promptEpicKey(projectContext, projectProfile)}",
+    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "sprintName": "${targetSprintName}"
+  },
+  "carryForward": [{ "ticketId": "TICKET-123", "summary": "title", "reason": "why it is not done or not ready", "assignee": "name or unassigned", "recommendation": "carry to next sprint|close|descope" }],
+  "backlog": [{ "ticketId": "TICKET-123", "summary": "title", "priority": "high|medium|low", "ready": true, "notes": "readiness gap, dependency, or reason it belongs in refinement" }],
+  "dependencies": [{ "dependency": "what is needed before the target sprint can run cleanly", "owner": "person or team", "status": "open|in progress|resolved|unknown", "risk": "impact if not resolved", "detail": "specific gate, target date, fallback, or context or null" }],
+  "teamLoad": [{ "name": "team member", "tickets": "current tickets or focus areas", "capacity": "available|limited|none" }],
+  "sprintRecommendation": [{ "ticketId": "TICKET-123", "summary": "title", "rationale": "why it is a strong target-sprint candidate" }],
+  "actions": [{ "focus": "follow-up for the Scrum lead", "owner": "person or team", "why": "why it matters before planning", "urgency": "today|this sprint|next sprint", "ticketId": "TICKET-123 or null", "detail": "specific follow-up detail or null" }],
+  "decisions": [{ "decision": "explicit refinement decision or confirmed call", "madeBy": "who", "impact": "practical impact on the target sprint", "detail": "specific detail or null" }],
+  "risks": [{ "risk": "target-sprint delivery risk", "level": "high|medium|low", "mitigation": "what must happen next" }],
+  "questions": [{ "target": "ticket, person, or topic", "question": "what should be asked before planning", "why": "why this matters for commitment quality", "needed": "decision, update, or confirmation needed" }],
+  "notes": ["short high-signal refinement note"],
+  "summary": "one sentence: readiness status for the target sprint"
+}
+
+Rules:
+- The target sprint is ${targetSprintName}. Focus on what should shape that sprint, not generic backlog commentary.
+- carryForward = work from ${promptSprintName(sprint, projectProfile)} that is likely to move, close, or be descoped. Include the reason and recommendation.
+- backlog = strongest target-sprint candidates from the board/backlog. ready must reflect whether the item looks truly ready now.
+- sprintRecommendation = 3 to 8 items worth protecting in the target sprint based on priority, readiness, dependencies, and carry-forward.
+- teamLoad = current team availability or pressure signals only when grounded in Jira / recorded delivery context.
+- decisions = only explicit recorded scope, sequencing, or readiness calls. Do not invent missing decisions.
+- questions, actions, risks, and notes must be high signal only and directly useful before planning.
+- If watch tickets are present, reflect them accurately in carryForward, backlog, actions, risks, questions, or notes when relevant.
+- Use null, [] or false when unknown. Do not guess.`;
+}
+
+function buildPlanningRovoPrompt({ projectContext, projectProfile, sprint, nextSprint }) {
+  const targetSprintName = promptNextSprintName(nextSprint, projectProfile, sprint);
+  return `Use live Jira board data, sprint planning evidence, backlog status, and recorded delivery notes for ${promptProjectKey(projectContext, projectProfile)} to capture the planned shape of ${targetSprintName}. Return ONLY valid JSON for the Scrum dashboard. No markdown. No commentary.
+
+This response must be directly usable by the dashboard without extra AI parsing.
+
+Current context
+- Project key: ${promptProjectKey(projectContext, projectProfile)}
+- Project name: ${promptProjectName(projectProfile, projectContext)}
+- Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
+- Current sprint: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Planned sprint: ${targetSprintName} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
+- Sprint cadence: ${promptCadence(projectProfile)}
+- Sprint goal hint: ${promptGoal(projectProfile) || 'not recorded'}
+- Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
+- Watch tickets: ${promptWatchTickets(projectProfile)}
+
+Return JSON in exactly this shape:
+{
+  "context": {
+    "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
+    "epic": "${promptEpicKey(projectContext, projectProfile)}",
+    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "sprintName": "${targetSprintName}"
+  },
+  "carryForward": [{ "ticketId": "TICKET-123", "summary": "title", "reason": "why it is carrying into planning", "assignee": "name or unassigned", "recommendation": "carry to next sprint|close|descope" }],
+  "backlog": [{ "ticketId": "TICKET-123", "summary": "title", "priority": "high|medium|low", "ready": true, "notes": "selected scope note, readiness gap, or why it stayed out" }],
+  "dependencies": [{ "dependency": "what the planned sprint depends on", "owner": "person or team", "status": "open|in progress|resolved|unknown", "risk": "impact if not resolved", "detail": "specific gate, target date, fallback, or context or null" }],
+  "teamLoad": [{ "name": "team member", "tickets": "planned tickets or focus areas", "capacity": "available|limited|none" }],
+  "sprintRecommendation": [{ "ticketId": "TICKET-123", "summary": "title", "rationale": "why this item belongs in the planned sprint" }],
+  "actions": [{ "focus": "follow-up for the Scrum lead", "owner": "person or team", "why": "why it matters after planning", "urgency": "today|this sprint|next sprint", "ticketId": "TICKET-123 or null", "detail": "specific follow-up detail or null" }],
+  "decisions": [{ "decision": "explicit planning decision", "madeBy": "who", "impact": "practical impact on planned scope", "detail": "specific detail or null" }],
+  "risks": [{ "risk": "planned-sprint delivery risk", "level": "high|medium|low", "mitigation": "what must happen next" }],
+  "questions": [{ "target": "ticket, person, or topic", "question": "what still needs confirming after planning", "why": "why it matters for sprint commitment", "needed": "decision, update, or confirmation needed" }],
+  "notes": ["short high-signal planning note"],
+  "summary": "one sentence: how solid the target sprint plan looks right now"
+}
+
+Rules:
+- The planned sprint is ${targetSprintName}. Focus on selected scope, carry-over, dependencies, and delivery confidence.
+- backlog = items selected for the planned sprint when explicit. If selection is not explicit, include only well-supported candidates and say so in notes.
+- carryForward = work moving out of ${promptSprintName(sprint, projectProfile)} into ${targetSprintName}, with the reason.
+- sprintRecommendation = the strongest sequence or protected scope for the planned sprint, not a full ticket dump.
+- decisions must capture explicit scope, sequencing, estimation, or approach calls only.
+- teamLoad must reflect known availability or load concerns, not guesswork.
+- Use questions and actions only for the handful of items the Scrum lead should actively resolve or monitor.
+- If watch tickets are present, reflect them accurately in carryForward, backlog, actions, risks, questions, or notes when relevant.
+- Use null, [] or false when unknown. Do not guess.`;
+}
+
+function buildReviewRovoPrompt({ projectContext, projectProfile, sprint, nextSprint }) {
+  return `Use live Jira sprint data, sprint report evidence, linked review notes, and any explicitly recorded stakeholder feedback for ${promptProjectKey(projectContext, projectProfile)} to capture sprint review intelligence for ${promptSprintName(sprint, projectProfile)}. Return ONLY valid JSON for the Scrum dashboard. No markdown. No commentary.
+
+This response must be directly usable by the dashboard without extra AI parsing.
+
+Current context
+- Project key: ${promptProjectKey(projectContext, projectProfile)}
+- Project name: ${promptProjectName(projectProfile, projectContext)}
+- Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
+- Sprint under review: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Next sprint: ${promptNextSprintName(nextSprint, projectProfile, sprint)} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
+- Sprint cadence: ${promptCadence(projectProfile)}
+- Sprint goal hint: ${promptGoal(projectProfile) || 'not recorded'}
+- Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
+- Watch tickets: ${promptWatchTickets(projectProfile)}
+
+Return JSON in exactly this shape:
+{
+  "context": {
+    "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
+    "epic": "${promptEpicKey(projectContext, projectProfile)}",
+    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "sprintName": "${promptSprintName(sprint, projectProfile)}"
+  },
+  "sprintGoal": { "achieved": true, "evidence": "one sentence using explicit sprint evidence" },
+  "completed": [{ "ticketId": "TICKET-123 or null", "summary": "what was demonstrably delivered or accepted" }],
+  "incomplete": [{ "ticketId": "TICKET-123 or null", "summary": "what was not completed or not accepted", "reason": "why it remains open" }],
+  "stakeholderFeedback": ["explicit stakeholder or demo feedback point"],
+  "actions": [{ "focus": "follow-up for the Scrum lead", "owner": "person or team", "why": "why it matters after the review", "urgency": "today|this sprint|next sprint", "ticketId": "TICKET-123 or null", "detail": "specific follow-up detail or null" }],
+  "decisions": [{ "decision": "explicit review decision or confirmation", "madeBy": "who", "impact": "practical impact", "detail": "specific detail or null" }],
+  "notes": ["short high-signal sprint review note"],
+  "summary": "one sentence: sprint review outcome"
+}
+
+Rules:
+- sprintGoal.achieved must reflect the explicit sprint outcome, not optimism.
+- completed = only work demonstrably completed, accepted, or clearly demoed by sprint close.
+- incomplete = committed or expected work that remained open, was rejected, or needs carry-over, with concise reason.
+- stakeholderFeedback = only explicitly recorded stakeholder reactions, requests, or concerns. If none are recorded, return [].
+- decisions = explicit approvals, deferrals, scope calls, or readiness confirmations only.
+- actions = close-out or follow-up actions the Scrum lead should actively track after the review.
+- Do not produce deck bullets, presentation wording, or invented business benefits.
+- If watch tickets are present, reflect them accurately in completed, incomplete, actions, decisions, or notes when relevant.
+- Use null or [] when unknown. Do not guess.`;
+}
+
+function buildRetroRovoPrompt({ projectContext, projectProfile, sprint, nextSprint }) {
+  return `Use recorded retrospective notes, sprint outcome evidence, Jira delivery signals, and linked team feedback for ${promptProjectKey(projectContext, projectProfile)} to capture retrospective intelligence for ${promptSprintName(sprint, projectProfile)}. Return ONLY valid JSON for the Scrum dashboard. No markdown. No commentary.
+
+This response must be directly usable by the dashboard without extra AI parsing.
+
+Current context
+- Project key: ${promptProjectKey(projectContext, projectProfile)}
+- Project name: ${promptProjectName(projectProfile, projectContext)}
+- Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
+- Sprint in retro: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Next sprint: ${promptNextSprintName(nextSprint, projectProfile, sprint)} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
+- Sprint cadence: ${promptCadence(projectProfile)}
+- Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
+- Watch tickets: ${promptWatchTickets(projectProfile)}
+
+Return JSON in exactly this shape:
+{
+  "context": {
+    "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
+    "epic": "${promptEpicKey(projectContext, projectProfile)}",
+    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "sprintName": "${promptSprintName(sprint, projectProfile)}"
+  },
+  "wentWell": ["specific thing that helped delivery or team flow"],
+  "didntGoWell": ["specific issue that hurt delivery or team flow"],
+  "actions": [{ "focus": "improvement action", "owner": "person or team", "why": "why this change matters next sprint", "urgency": "today|this sprint|next sprint", "detail": "specific experiment, habit, or operating change or null" }],
+  "notes": ["short high-signal retrospective note"],
+  "summary": "one sentence: key retrospective outcome"
+}
+
+Rules:
+- Keep the focus on delivery, operating rhythm, collaboration, dependencies, and team flow in ${promptSprintName(sprint, projectProfile)}.
+- wentWell and didntGoWell must be concrete, evidence-based, and concise. Avoid vague morale language unless it clearly affected delivery.
+- actions must be real improvement experiments or operating changes with an owner, not generic advice.
+- notes should hold only extra context that does not duplicate wentWell, didntGoWell, or actions.
+- If watch tickets or repeated blockers materially affected the retro, reflect them in didntGoWell, actions, or notes when relevant.
+- Use [] when the evidence does not support a point. Do not guess or invent team sentiment.`;
+}
+
 export const MEETINGS = {
 
   // ── DAILY STANDUP ──────────────────────────────────────────────────────────
@@ -110,81 +360,68 @@ export const MEETINGS = {
 
 Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
-    rovoPrompt: ({ projectContext, projectProfile, sprint, nextSprint }) => `Use the live Jira board for ${promptProjectKey(projectContext, projectProfile)} ${promptSprintName(sprint, projectProfile)} and reply in this exact format only. Do not add extra sections, commentary, markdown, or duplicates.
-Only include tickets that are in ${promptSprintName(sprint, projectProfile)} unless the section explicitly says Backlog.
-For every ticket, include the current Jira status, assignee, epic key, epic title, and most recent update date if available.
-Use the latest Jira state from the board, sprint view, and recent ticket updates.
-If a value is missing, write "null".
+    rovoPrompt: ({ projectContext, projectProfile, sprint, nextSprint }) => `Use live Jira board data for ${promptProjectKey(projectContext, projectProfile)} and return ONLY valid JSON for the Scrum dashboard. No markdown. No commentary.
 
-PROJECT: ${promptProjectKey(projectContext, projectProfile)} | PROJECT NAME: ${promptProjectName(projectProfile, projectContext)} | SPRINT: ${promptSprintNum(sprint)}
+This response must be directly usable by the dashboard without any extra AI parsing.
 
-CONTEXT
-Project key | Primary epic ID | Primary epic name | Current sprint name | Next sprint name
-${promptProjectKey(projectContext, projectProfile)} | ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)} | ${promptSprintName(sprint, projectProfile)} | ${promptNextSprintName(nextSprint, projectProfile, sprint)}
+Current context
+- Project key: ${promptProjectKey(projectContext, projectProfile)}
+- Project name: ${promptProjectName(projectProfile, projectContext)}
+- Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
+- Current sprint: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Next sprint: ${promptNextSprintName(nextSprint, projectProfile, sprint)} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
+- Sprint cadence: ${promptCadence(projectProfile)}
+- Sprint goal hint: ${promptGoal(projectProfile) || 'not recorded'}
+- Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
+- Watch tickets: ${promptWatchTickets(projectProfile)}
 
-WORKSTREAMS / EPICS IN PLAY
-${promptWorkstreams(projectProfile, projectContext)}
+Return JSON in exactly this shape:
+{
+  "context": {
+    "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
+    "epic": "${promptEpicKey(projectContext, projectProfile)}",
+    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "sprintName": "${promptSprintName(sprint, projectProfile)}"
+  },
+  "metrics": {
+    "done": 0,
+    "inprog": 0,
+    "inreview": 0,
+    "blocked": 0,
+    "todo": 0,
+    "backlog": 0,
+    "health": "on track|at risk|behind|unknown"
+  },
+  "ticketsDone": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "ticketsInProgress": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "ticketsInReview": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "ticketsBlocked": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "ticketsTodo": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "staleInProgress": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "days": 5, "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "notPickedUp": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "days": 5, "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "blockers": [{ "title": "short blocker title", "detail": "current blocker detail", "ticketId": "TICKET-123", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "actions": [{ "focus": "follow-up for the Scrum lead", "owner": "person or team", "why": "why it matters now", "urgency": "today|this sprint|next sprint", "ticketId": "TICKET-123 or null", "detail": "specific follow-up detail or null" }],
+  "nextSteps": [{ "step": "what should happen next", "owner": "person or team", "timing": "today|this week|next standup|next session", "why": "why it matters now", "detail": "specific supporting detail or null" }],
+  "decisions": [{ "decision": "explicit current decision or confirmation", "madeBy": "who", "impact": "practical impact", "detail": "specific detail or null" }],
+  "risks": [{ "risk": "delivery risk", "level": "high|medium|low", "mitigation": "what needs to happen next" }],
+  "questions": [{ "target": "ticket, person, or topic", "question": "what should be asked", "why": "why this matters now", "needed": "decision, update, or confirmation needed" }],
+  "notes": ["short high-signal standup note"],
+  "summary": "one sentence: most important thing to know right now"
+}
 
-WATCH TICKETS / PRIORITY ITEMS
-${promptWatchTickets(projectProfile)}
-
-TICKETS
-List every ticket in ${promptSprintName(sprint, projectProfile)} on a separate line:
-TICKET-123 | Epic ID | Epic name | Title | Status | Assignee | Last updated date
-
-STALE IN PROGRESS (status = "In Progress", not updated in 5+ days)
-List only tickets stuck in In Progress with no movement for 5 or more days:
-TICKET-123 | Epic ID | Epic name | Title | Assignee | Days since update
-
-NOT PICKED UP (status = "To Do" or "Backlog", sitting untouched)
-List only tickets that have not been started:
-TICKET-123 | Epic ID | Epic name | Title | Assignee | Days in backlog
-
-BLOCKERS
-List only tickets that are blocked right now.
-Strict rule: a ticket is blocked only if Jira currently shows status = Blocked, or the issue is currently Flagged / Impediment.
-Do not mark a ticket as blocked just because the description, comments, or linked work mention dependency issues, missing business input, or pending decisions.
-TICKET-123 | Epic ID | Epic name | Title | Assignee | Reason blocked
-
-TICKETS BY STATUS
-Done — list each completed ticket:
-TICKET-123 | Epic ID | Epic name | Title | Assignee
-
-In Progress — list each active ticket:
-TICKET-123 | Epic ID | Epic name | Title | Assignee
-
-In Review — list each ticket under review:
-TICKET-123 | Epic ID | Epic name | Title | Assignee
-
-Blocked — list each blocked ticket:
-TICKET-123 | Epic ID | Epic name | Title | Assignee
-
-To Do — list each unstarted ticket (in sprint):
-TICKET-123 | Epic ID | Epic name | Title | Assignee
-
-COUNTS
-Done: X
-In Progress: X
-In Review: X
-Blocked: X
-To Do: X
-Backlog: X
-
-HEALTH
-One sentence: on track or at risk for sprint goal "${promptGoal(projectProfile)}" by the end of ${promptSprintName(sprint, projectProfile)}?
-
-Important:
-- Do not invent blocker reasons.
-- Do not include the same ticket twice in the same section.
-- Keep titles short but recognisable.
-- Prefer the latest Jira information over older comments.
-- If watch tickets are listed above, make sure their current Jira status is reflected accurately in the relevant section.
-- If a ticket is blocked, make sure it also appears in the Blocked status section.
-- If a ticket has moved recently, use the current status, not a previous one.
-- Do not infer blocked from the title or description alone.
-- If a ticket is In Progress, Selected for Sprint, To Do, In Review, or Done and there is no current impediment flag, keep it in its real status and do not put it in BLOCKERS.
-- Treat dependency issues as risks/dependencies unless Jira explicitly shows the ticket is blocked right now.
-- Before replying, cross-check that the Blocked count matches the number of tickets in the Blocked status list.`,
+Rules:
+- Use the live current sprint from Jira board evidence, not historical defaults.
+- Only include tickets that are currently in ${promptSprintName(sprint, projectProfile)} unless the field explicitly allows backlog/not picked up context.
+- metrics counts must match the ticket arrays.
+- If a ticket is blocked, it must also appear in ticketsBlocked.
+- A ticket can appear in only one of ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo.
+- blocked means blocked right now: current Jira status = Blocked or a current Flagged/Impediment signal. Do not infer blocked from old comments alone.
+- staleInProgress = currently In Progress with no movement for 5+ days.
+- notPickedUp = currently To Do or Backlog with no start.
+- Use null, [] or 0 when unknown. Do not guess.
+- Keep ticket titles short but recognisable.
+- Keep actions, decisions, risks, questions, nextSteps, and notes high signal only.
+- If watch tickets are present, make sure their current Jira status is reflected accurately in the relevant arrays.`,
 
     systemPrompt:
 `You extract standup intelligence for the Scrum lead on the current project.
@@ -283,9 +520,9 @@ If someone confirms a blocker is removed, test data is shared, a meeting time ch
     label: 'Refinement',
     color: '#22c55e',
     sections: ['questions','carryForward','backlog','dependencies','actions','decisions','notes'],
-    useRovo: false,
+    useRovo: true,
     useNotes: true,
-    rovoLabel: null,
+    rovoLabel: 'Use Jira / Rovo to shape the next sprint before planning',
     notesLabel: 'Paste transcript or refinement notes',
     notesPlaceholder: `Paste your refinement transcript or notes here.
 
@@ -298,7 +535,7 @@ Useful content:
 
 Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
-    rovoPrompt: null,
+    rovoPrompt: buildRefinementRovoPrompt,
     systemPrompt: UPCOMING_SPRINT_INTELLIGENCE_PROMPT,
   },
 
@@ -308,9 +545,9 @@ Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting n
     label: 'Sprint planning',
     color: '#16a34a',
     sections: ['questions','carryForward','backlog','dependencies','actions','decisions'],
-    useRovo: false,
+    useRovo: true,
     useNotes: true,
-    rovoLabel: null,
+    rovoLabel: 'Use Jira / Rovo to capture the planned sprint shape',
     notesLabel: 'Paste transcript or sprint planning notes',
     notesPlaceholder: `Paste your sprint planning transcript or agreed notes here.
 
@@ -323,7 +560,7 @@ Useful content:
 
 Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
 
-    rovoPrompt: null,
+    rovoPrompt: buildPlanningRovoPrompt,
     systemPrompt: UPCOMING_SPRINT_INTELLIGENCE_PROMPT,
   },
 
@@ -333,9 +570,9 @@ Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting n
     label: 'Sprint review',
     color: '#d97706',
     sections: ['goalVerdict','completed','incomplete','actions','decisions','notes'],
-    useRovo: false,
+    useRovo: true,
     useNotes: true,
-    rovoLabel: null,
+    rovoLabel: 'Use Jira / Rovo to capture sprint-close evidence',
     notesLabel: 'Paste transcript or sprint review notes',
     notesPlaceholder: `Paste your sprint review transcript or notes here.
 
@@ -348,6 +585,8 @@ Can include:
 
 Plain notes, bullet points, or full transcript — all accepted.
 Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
+
+    rovoPrompt: buildReviewRovoPrompt,
 
     systemPrompt:
 `You extract sprint review intelligence for the Scrum lead on the current project.
@@ -375,9 +614,9 @@ Do not draft slide bullets, deck text, or presentation wording — this prompt i
     label: 'Retrospective',
     color: '#dc2626',
     sections: ['wentWell','didntGoWell','actions','notes'],
-    useRovo: false,
+    useRovo: true,
     useNotes: true,
-    rovoLabel: null,
+    rovoLabel: 'Use Jira / Rovo to capture recorded retro outcomes',
     notesLabel: 'Paste transcript or retro notes',
     notesPlaceholder: `Paste your retrospective notes or transcript here.
 
@@ -388,6 +627,8 @@ ACTIONS: ...
 
 Or just paste the transcript — any format works.
 Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting notes tools, or manual notes.`,
+
+    rovoPrompt: buildRetroRovoPrompt,
 
     systemPrompt:
 `You extract retrospective intelligence for the Scrum lead on the current project.
@@ -489,38 +730,39 @@ export const DEFAULT_SPRINTS = [
 
 // ─── Insights / Velocity meeting config ───────────────────────────────────────
 export const INSIGHTS_CONFIG = {
-  rovoPrompt: ({ projectContext, projectProfile, sprint, nextSprint }) => `Use Jira data for ${promptProjectKey(projectContext, projectProfile)} only and reply in this exact format only. Do not add commentary or estimates.
-Use the last 3 completed sprints plus the current sprint.
-If a value is missing in Jira, write "not recorded".
-Use committed values from the sprint start and completed values from the sprint close, or current completed values for the active sprint.
+  rovoPrompt: ({ projectContext, projectProfile, sprint, nextSprint }) => `Use Jira data for ${promptProjectKey(projectContext, projectProfile)} only and return ONLY valid JSON for the dashboard. No markdown. No commentary.
 
-CONTEXT
-Project key | Project name | Primary epic ID | Primary epic name | Current sprint name | Next sprint name
-${promptProjectKey(projectContext, projectProfile)} | ${promptProjectName(projectProfile, projectContext)} | ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)} | ${promptSprintName(sprint, projectProfile)} | ${promptNextSprintName(nextSprint, projectProfile, sprint)}
+This response must be directly usable by the dashboard without extra AI parsing.
 
-WORKSTREAMS / EPICS IN PLAY
-${promptWorkstreams(projectProfile, projectContext)}
+Current context
+- Project key: ${promptProjectKey(projectContext, projectProfile)}
+- Project name: ${promptProjectName(projectProfile, projectContext)}
+- Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
+- Current sprint: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Next sprint: ${promptNextSprintName(nextSprint, projectProfile, sprint)} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
+- Sprint cadence: ${promptCadence(projectProfile)}
+- Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
 
-SPRINT VELOCITY
+Return JSON in exactly this shape:
+{
+  "context": { "projectKey": "${promptProjectKey(projectContext, projectProfile)}", "epic": "${promptEpicKey(projectContext, projectProfile)}", "epicName": "${promptEpicName(projectContext, projectProfile)}", "sprintName": "${promptSprintName(sprint, projectProfile)}" },
+  "sprints": [
+    { "num": 1, "name": "Sprint name", "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 }
+  ],
+  "current": { "num": ${promptSprintNum(sprint)}, "name": "${promptSprintName(sprint, projectProfile)}", "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 },
+  "insights": ["specific delivery insight", "specific delivery insight", "specific delivery insight"],
+  "recommendation": "one specific recommendation or null",
+  "summary": "one sentence velocity summary"
+}
 
-For each of the last 3 completed sprints, provide one block in this exact shape:
-Sprint number: [number]
-Sprint name: [name]
-Committed story points: [number]
-Completed story points: [number]
-Committed tickets: [number]
-Completed tickets: [number]
-
-Current sprint ${promptSprintNum(sprint)} (${promptSprintName(sprint, projectProfile)} — in progress)
-Committed story points: [number]
-Completed so far: [number]
-Committed tickets: [number]
-Completed so far: [number]
-
-Important:
-- Do not estimate missing story points.
+Rules:
+- Use the last 3 completed sprints plus the current sprint when available.
 - Keep the real sprint numbering and names from Jira.
-- Use ticket counts from Jira, not a manual guess.`,
+- Do not estimate missing points or ticket counts.
+- Use null for unknown point values instead of guessing.
+- insights must be specific to delivery patterns, carry-over, blocked work, or capacity trends.
+- Maximum 3 insights, each high signal and concise.
+- recommendation must be specific and practical, not generic.`,
 
   systemPrompt: `You extract sprint velocity and coaching insights for the Scrum lead on the current project.
 Input is Rovo/Jira velocity data.

@@ -341,6 +341,10 @@ function parseLooseJsonObject(raw) {
   return null;
 }
 
+export function tryParseLooseJsonObject(raw) {
+  return parseLooseJsonObject(raw);
+}
+
 export function isProjectSetupPayload(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const hasProjectProfile = value.projectProfile && typeof value.projectProfile === 'object' && !Array.isArray(value.projectProfile);

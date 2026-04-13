@@ -49,8 +49,8 @@ function jsonResponse(res, statusCode, payload) {
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
   });
   res.end(body);
 }
@@ -58,8 +58,8 @@ function jsonResponse(res, statusCode, payload) {
 function sendNoContent(res) {
   res.writeHead(204, {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
   });
   res.end();
 }
@@ -149,6 +149,70 @@ function readJsonBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+async function proxyOpenRouterChat(body, requestUrl) {
+  const openrouterKey = typeof body?.openrouterKey === 'string' ? body.openrouterKey.trim() : '';
+  const model = typeof body?.model === 'string' ? body.model.trim() : '';
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+
+  if (!openrouterKey) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include openrouterKey.' } },
+    };
+  }
+
+  if (!model) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include model.' } },
+    };
+  }
+
+  if (!messages.length) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include messages.' } },
+    };
+  }
+
+  try {
+    const upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openrouterKey}`,
+        'HTTP-Referer': `${requestUrl.origin}/`,
+        'X-OpenRouter-Title': 'Scrum Intelligence',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: body?.temperature,
+        max_completion_tokens: body?.max_completion_tokens,
+        response_format: body?.response_format,
+      }),
+    });
+
+    const text = await upstream.text();
+    let payload;
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { error: { message: text || 'OpenRouter returned a non-JSON response.' } };
+    }
+
+    return {
+      status: upstream.status,
+      payload,
+    };
+  } catch (error) {
+    return {
+      status: 502,
+      payload: { error: { message: error?.message || 'OpenRouter proxy request failed.' } },
+    };
+  }
 }
 
 function serveStaticAsset(req, res, pathname) {
@@ -250,6 +314,22 @@ const server = http.createServer(async (req, res) => {
     }
 
     jsonResponse(res, 405, { error: 'Method not allowed.' });
+    return;
+  }
+
+  if (pathname === '/api/openrouter/chat') {
+    if (req.method !== 'POST') {
+      jsonResponse(res, 405, { error: 'Method not allowed.' });
+      return;
+    }
+
+    try {
+      const body = await readJsonBody(req);
+      const proxied = await proxyOpenRouterChat(body, requestUrl);
+      jsonResponse(res, proxied.status, proxied.payload);
+    } catch (error) {
+      jsonResponse(res, 400, { error: { message: error.message || 'Could not proxy the OpenRouter request.' } });
+    }
     return;
   }
 

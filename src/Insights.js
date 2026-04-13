@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { INSIGHTS_CONFIG } from './config';
 import { callAI } from './api';
+import { OPENROUTER_MODEL_CHAIN } from './aiProviders';
 import {
   DEFAULT_PROJECT_PROFILE,
   deriveProjectContextFromProfile,
   normaliseProjectProfile,
+  tryParseLooseJsonObject,
 } from './projectProfile';
 
 const C = {
@@ -17,6 +19,10 @@ const C = {
   red:'var(--app-red)', redBg:'var(--app-red-bg)',
 };
 
+const OPENROUTER_MODEL_META = Object.fromEntries(
+  OPENROUTER_MODEL_CHAIN.map((model) => [model.key, model]),
+);
+
 function textValue(value) {
   if (value == null) return '';
   const text = String(value).trim();
@@ -25,6 +31,16 @@ function textValue(value) {
 
 function firstValue(...values) {
   return values.map(textValue).find(Boolean) || '';
+}
+
+function isDirectInsightsPayload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return ['context', 'sprints', 'current', 'insights', 'recommendation', 'summary'].some((key) => key in value);
+}
+
+function tryParseDirectInsightsPayload(raw) {
+  const parsed = tryParseLooseJsonObject(raw);
+  return isDirectInsightsPayload(parsed) ? parsed : null;
 }
 
 function Spinner() {
@@ -196,23 +212,21 @@ export default function Insights({ state, persist, onAIStatusChange }) {
 
   const process = async () => {
     if (!paste.trim()) { setStatus('Paste Rovo response above first'); return; }
-    if (!state.groqKey && !state.openrouterKey && !state.cerebrasKey) { setStatus('No API key — click API keys'); return; }
+    const directJsonPayload = tryParseDirectInsightsPayload(paste);
+    if (!directJsonPayload && !state.openrouterKey) { setStatus('Paste a valid Rovo JSON response or add an OpenRouter key for AI parsing.'); return; }
     setLoading(true);
-    setStatus('Processing...');
+    setStatus(directJsonPayload ? 'Valid Rovo JSON detected. Applying directly...' : 'Processing...');
     try {
-      let resolvedProvider = 'none';
-      const parsed = await callAI(
+      let resolvedModelKey = 'none';
+      const parsed = directJsonPayload || await callAI(
         INSIGHTS_CONFIG.systemPrompt, paste,
         {
-          groqKey: state.groqKey,
           openrouterKey: state.openrouterKey,
-          openrouterModel: state.openrouterModel,
-          cerebrasKey: state.cerebrasKey,
         },
-        (provider, msg, providers) => {
-          onAIStatusChange?.(providers);
-          if (provider === 'groq' || provider === 'openrouter' || provider === 'cerebras') {
-            resolvedProvider = provider;
+        (provider, msg, providerStates) => {
+          onAIStatusChange?.(providerStates);
+          if (OPENROUTER_MODEL_META[provider]) {
+            resolvedModelKey = provider;
           }
           setStatus(msg);
         }
@@ -237,14 +251,11 @@ export default function Insights({ state, persist, onAIStatusChange }) {
         lastUpdated: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}),
       });
       setPaste('');
-      const providerLabel =
-        resolvedProvider === 'groq'
-          ? 'Updated with Groq'
-          : resolvedProvider === 'openrouter'
-            ? 'Updated with OpenRouter'
-          : resolvedProvider === 'cerebras'
-            ? 'Updated with Cerebras'
-            : 'Velocity updated';
+      const providerLabel = directJsonPayload
+        ? 'Velocity updated from Rovo JSON'
+        : OPENROUTER_MODEL_META[resolvedModelKey]
+        ? `Updated with ${OPENROUTER_MODEL_META[resolvedModelKey].label} via OpenRouter`
+        : 'Velocity updated';
       setStatus(parsed.summary ? `${providerLabel} · ${parsed.summary}` : providerLabel);
     } catch(e) {
       persist({ apiProvider: 'none' });
@@ -280,10 +291,10 @@ export default function Insights({ state, persist, onAIStatusChange }) {
             style={{ width:'100%', fontSize:'12px', padding:'12px 14px', border:`1px solid ${C.bd}`, borderRadius:'14px', background:C.bg0,
               color:C.text0, resize:'vertical', fontFamily:'inherit', lineHeight:'1.6', minHeight:'130px', outline:'none' }}
             value={paste} onChange={e => setPaste(e.target.value)}
-            placeholder="Paste the Rovo response here..." />
+            placeholder="Paste the Rovo JSON response here..." />
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:'12px', gap:'8px', flexWrap:'wrap' }}>
             <span style={{ fontSize:'11px', color:C.text2, flex:1 }}>
-              {loading ? <span>Processing<Spinner /></span> : status || 'Paste the Rovo response here, then update the dashboard.'}
+              {loading ? <span>Processing<Spinner /></span> : status || 'Paste the Rovo JSON response here, then update the dashboard.'}
             </span>
             <button onClick={process} disabled={loading}
               style={{ padding:'8px 16px', border:'none', borderRadius:'12px', cursor:'pointer',
@@ -348,7 +359,7 @@ export default function Insights({ state, persist, onAIStatusChange }) {
         </div>
       ) : (
         <div style={{ ...surfaceStyle, textAlign:'center', color:C.text2, fontSize:'12px' }}>
-          Copy the Rovo prompt, paste the response, and click Update to see velocity data.
+          Copy the Rovo prompt, paste the Rovo JSON response, and click Update to see velocity data.
         </div>
       )}
 
