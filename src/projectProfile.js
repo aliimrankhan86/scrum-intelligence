@@ -66,60 +66,27 @@ function sprintGapDaysBetween(previousEnd, nextStart) {
 
 export const DEFAULT_PROJECT_PROFILE = {
   dashboardTitle: "Scrum Intelligence",
-  projectLabel: "UEL RPA Project",
-  projectKey: "RPAB",
-  projectName: "UK Prospect Data Cleansing Automation",
-  primaryEpic: "RPAB-27",
-  primaryEpicName: "UK Prospect Data Cleansing Automation",
-  goal: "Get Prospect Dataset UAT completed and ready for CAB",
-  phase: "Late build / system test — UAT and CAB readiness",
-  what: "UiPath bot monitors SharePoint for UCAS/University Search prospect spreadsheets, cleanses and maps records using Crib sheet into CRM-ready Excel, creates Jira ticket with link to output, archives originals. No dispatcher — single Performer via UiPath Integration Service.",
-  scrumMasterName: "Ali Khan",
-  scrumMasterRole: "Senior Scrum Master",
+  projectLabel: "Project dashboard",
+  projectKey: "",
+  projectName: "",
+  primaryEpic: "",
+  primaryEpicName: "",
+  goal: "",
+  phase: "",
+  what: "",
+  scrumMasterName: "",
+  scrumMasterRole: "Scrum lead",
   sprintNameTemplate: "{projectKey} Sprint {num}",
   sprintDurationDays: 14,
-  sprintGapDays: 1,
-  reviewDeckReference: "RPA Sprint 2 Review - Recording Link included.pptx",
-  reviewDeckGuidance: "Use the latest accepted stakeholder review deck as the locked format reference.",
-  workstreams: [
-    {
-      epic: "RPAB-27",
-      epicName: "UK Prospect Data Cleansing Automation",
-      focus: "Prospect cleansing, UAT readiness, and CAB preparation",
-    },
-  ],
-  team: [
-    { name: "Ali Khan", role: "Senior Scrum Master" },
-    { name: "Ahmed Sheikh", role: "Product Owner" },
-    { name: "Zohaib Ahmed", role: "Business Analyst" },
-    { name: "Marion Raji", role: "Business Analyst / UAT Lead" },
-    { name: "Nick Baumer", role: "Solutions Architect / RPA Developer" },
-    { name: "Todd Slaughter", role: "Lead Automation Developer" },
-    { name: "Jahangir Ali", role: "Lead Automation Developer" },
-  ],
-  stakeholders: [
-    { name: "Stefanie Walton", role: "Business Owner" },
-    { name: "Laura Parker", role: "Process Owner" },
-    { name: "Kazi Ehsan", role: "Lead UK Recruitment SME" },
-    { name: "Meg Ruk", role: "Senior CRM Channel Manager" },
-    { name: "Omkar Jaganade", role: "CRM SME" },
-  ],
-  watchTickets: ["RPAB-98", "RPAB-57", "RPAB-53", "RPAB-54", "RPAB-55", "RPAB-58", "RPAB-59", "RPAB-25"],
-  knownRisks: [
-    "RPAB-98 Jira API vs GUI unresolved — blocks ticket creation design",
-    "UAT test data not provided by business (RPAB-57)",
-    "QA environment not started (RPAB-53/54/55/58/59)",
-    "Duplicate processing not handled in bot",
-    "Audit record design undefined",
-  ],
-  knownDecisions: [
-    "No dispatcher — single Performer via UiPath Integration Service",
-    "UiPath workbook activities only — no Excel app",
-    "Jira ticket raised with link not attachment",
-    "All opt-ins set to FALSE",
-    "No PII in Orchestrator logs",
-    "Direct CRM upload manual — out of scope",
-  ],
+  sprintGapDays: 0,
+  reviewDeckReference: "",
+  reviewDeckGuidance: "",
+  workstreams: [],
+  team: [],
+  stakeholders: [],
+  watchTickets: [],
+  knownRisks: [],
+  knownDecisions: [],
 };
 
 export function normaliseProjectProfile(profile = {}, options = {}) {
@@ -202,10 +169,13 @@ export function normaliseSprints(sprints, profile) {
         active: Boolean(sprint?.active),
       };
     })
-    .filter(Boolean)
-    .sort((a, b) => a.num - b.num);
+    .filter(Boolean);
 
-  return items.length ? items : [];
+  const deduped = Array.from(
+    items.reduce((map, item) => map.set(item.num, item), new Map()).values(),
+  ).sort((a, b) => a.num - b.num);
+
+  return deduped.length ? deduped : [];
 }
 
 export function inferSprintCadence(profile, sprints = []) {
@@ -283,16 +253,61 @@ export function generateFutureSprints(sprints = [], profile, count = 6) {
   return items;
 }
 
-export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprints = []) {
+function recentHistorySummaryText(summary) {
+  if (!summary || typeof summary !== "object") return "";
+  const imported = textValue(summary?.setupHistory?.summary);
+  if (imported) return imported;
+  const meetingSummary = Array.isArray(summary?.meetings)
+    ? summary.meetings.map((item) => textValue(item?.summary)).find(Boolean)
+    : "";
+  if (meetingSummary) return meetingSummary;
+  return textValue(summary?.velocity?.summary || summary?.velocity?.recommendation);
+}
+
+function sprintStageLabel(sprint, activeSprintNum) {
+  if (!sprint) return "planned";
+  if (sprint.active) return "active";
+  if (Number.isFinite(Number(activeSprintNum))) {
+    if (sprint.num === Number(activeSprintNum)) return "active";
+    if (sprint.num < Number(activeSprintNum)) return "completed";
+    if (sprint.num > Number(activeSprintNum)) return "upcoming";
+  }
+  return "planned";
+}
+
+export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprints = [], sprintSummaries = {}) {
   const safe = normaliseProjectProfile(profile);
-  const sprintLines = normaliseSprints(sprints, safe)
-    .slice(0, 6)
-    .map((sprint) => `- ${sprint.num} | ${sprint.name} | ${sprint.start} | ${sprint.end}${sprint.active ? " | active" : ""}`)
+  const sprintItems = normaliseSprints(sprints, safe);
+  const activeSprintNum =
+    sprintItems.find((item) => item.active)?.num ||
+    sprintItems[sprintItems.length - 1]?.num ||
+    null;
+  const { durationDays, gapDays } = inferSprintCadence(safe, sprintItems);
+  const sprintLines = sprintItems
+    .slice(-8)
+    .map((sprint) => `- ${sprint.num} | ${sprint.name} | ${sprint.start} | ${sprint.end} | ${sprintStageLabel(sprint, activeSprintNum)}`)
     .join("\n");
+  const historyLines = Object.entries(sprintSummaries || {})
+    .sort((a, b) => Number(b[0]) - Number(a[0]))
+    .slice(0, 4)
+    .map(([num, summary]) => {
+      const label = textValue(summary?.label) || `Sprint ${num}`;
+      const detail = recentHistorySummaryText(summary) || "Archived sprint snapshot available";
+      return `- ${num} | ${label} | ${detail}`;
+    })
+    .join("\n");
+  const projectKeyLabel = safe.projectKey || "not configured";
+  const projectNameLabel = safe.projectName || "not configured";
+  const primaryEpicLabel = safe.primaryEpic
+    ? `${safe.primaryEpic}${safe.primaryEpicName ? ` — ${safe.primaryEpicName}` : ""}`
+    : "not configured";
+  const scrumLeadLabel = safe.scrumMasterName
+    ? `${safe.scrumMasterName}${safe.scrumMasterRole ? ` — ${safe.scrumMasterRole}` : ""}`
+    : safe.scrumMasterRole || "not configured";
 
   return [
-    `Use current Jira / Confluence / project documentation / delivery notes to prepare a full first-time project setup pack for a Scrum dashboard.`,
-    `This setup must let the dashboard adapt to the current project with one response, so return only current confirmed project and sprint information.`,
+    `Use current Jira / Confluence / project documentation / delivery notes to prepare a reusable first-time project setup pack for a Scrum dashboard.`,
+    `This setup must let the dashboard adapt to any project with one response, so return current confirmed project context, recent sprint history, active sprint board data, and sprint cadence.`,
     `Do not assume missing details. If a value is not known, use null or [] rather than guessing.`,
     ``,
     `Return ONLY valid JSON in this exact shape:`,
@@ -324,6 +339,19 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `  "projectContext": { "projectKey": "jira project key or null", "epic": "primary epic key or null", "epicName": "primary epic title or null" },`,
     `  "sprints": [{ "num": 1, "name": "sprint name", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "active": true }],`,
     `  "activeSprint": 1,`,
+    `  "recentSprintHistory": [{`,
+    `    "num": 1,`,
+    `    "name": "sprint name",`,
+    `    "start": "YYYY-MM-DD",`,
+    `    "end": "YYYY-MM-DD",`,
+    `    "goal": "sprint goal or null",`,
+    `    "status": "completed | partial | slipped | cancelled | unknown | null",`,
+    `    "summary": "one-line sprint outcome",`,
+    `    "carryOver": ["ticket or carry-over theme"],`,
+    `    "completedHighlights": ["notable delivered item"],`,
+    `    "risks": ["key blocker, risk, or dependency"],`,
+    `    "metrics": { "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 }`,
+    `  }],`,
     `  "activeSprintBoard": {`,
     `    "summary": "one-line current sprint summary or null",`,
     `    "sprintGoal": "current sprint goal or null",`,
@@ -352,8 +380,10 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `Rules:`,
     `- Use the current project and current active sprint, not historical defaults.`,
     `- Prefer confirmed Jira / Confluence / project data over assumptions.`,
-    `- Include the active sprint and the next few sprints if known.`,
+    `- Include recent sprint history as quantity data: prefer at least the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.`,
+    `- If future sprint dates are not explicitly listed but cadence is clear from recent sprints or delivery notes, infer the next sprint dates from that cadence.`,
     `- Include sprint cadence when known: sprintDurationDays = inclusive sprint length, sprintGapDays = gap days between sprints.`,
+    `- Use recentSprintHistory to capture carry-over, recurring blockers, and delivery trends from previous sprints.`,
     `- Include every epic / workstream currently being worked on in or materially affecting the active sprint.`,
     `- Include all current sprint user stories, tasks, bugs, spikes, and sub-tasks that matter for the board.`,
     `- Include the current active sprint team from the scrum board / assignees when known, not only a generic team list.`,
@@ -366,17 +396,20 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `- Do not include commentary outside the JSON.`,
     ``,
     `Current dashboard seed context`,
-    `Project key: ${safe.projectKey}`,
-    `Project name: ${safe.projectName}`,
-    `Primary epic: ${safe.primaryEpic} — ${safe.primaryEpicName}`,
-    `Sprint naming template hint: ${safe.sprintNameTemplate}`,
-    `Sprint cadence hint: ${safe.sprintDurationDays || "unknown"} day sprint${safe.sprintGapDays != null ? ` | ${safe.sprintGapDays} gap day${safe.sprintGapDays === 1 ? "" : "s"}` : ""}`,
+    `Project key: ${projectKeyLabel}`,
+    `Project name: ${projectNameLabel}`,
+    `Primary epic: ${primaryEpicLabel}`,
+    `Scrum lead hint: ${scrumLeadLabel}`,
+    `Sprint naming template hint: ${safe.sprintNameTemplate || "not configured"}`,
+    `Sprint cadence hint: ${durationDays || "unknown"} day sprint${gapDays != null ? ` | ${gapDays} gap day${gapDays === 1 ? "" : "s"}` : ""}`,
     safe.workstreams.length
       ? `Known workstreams in the dashboard:
 ${safe.workstreams.map((item) => `- ${item.epic || "unknown"} | ${item.epicName || "untitled"}${item.focus ? ` | ${item.focus}` : ""}`).join("\n")}`
       : "",
     sprintLines ? `Current sprint list in the dashboard:
 ${sprintLines}` : "",
+    historyLines ? `Recent archived sprint context already in the dashboard:
+${historyLines}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -412,6 +445,21 @@ Schema:
   "projectContext": { "projectKey": "jira project key or null", "epic": "primary epic key or null", "epicName": "primary epic title or null" },
   "sprints": [{ "num": 1, "name": "sprint name", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "active": true }],
   "activeSprint": 1,
+  "recentSprintHistory": [
+    {
+      "num": 1,
+      "name": "sprint name",
+      "start": "YYYY-MM-DD",
+      "end": "YYYY-MM-DD",
+      "goal": "sprint goal or null",
+      "status": "completed | partial | slipped | cancelled | unknown | null",
+      "summary": "one-line sprint outcome",
+      "carryOver": ["ticket or carry-over theme"],
+      "completedHighlights": ["notable delivered item"],
+      "risks": ["key blocker, risk, or dependency"],
+      "metrics": { "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 }
+    }
+  ],
   "activeSprintBoard": {
     "summary": "one-line sprint summary or null",
     "sprintGoal": "current sprint goal or null",
@@ -443,9 +491,12 @@ Rules:
 - If sprint names are not given but sprint numbers are given, infer a clean sprint name from the project key when obvious.
 - If one sprint is marked active, set activeSprint to that sprint number.
 - If no sprint is marked active but activeSprint is clear from the notes, use it.
+- Prefer at least the last 2 completed sprints, the active sprint, and the next 2 planned sprints in "sprints" when that information is available.
+- If future sprint dates are not explicitly listed but cadence is clear from recent sprints or delivery notes, infer the next sprint dates from that cadence.
 - Team and stakeholder arrays should contain unique people only.
 - workstreams must cover all epics / workstreams currently in play.
 - Include sprint cadence when known: sprintDurationDays = inclusive sprint length, sprintGapDays = gap days between sprints.
+- recentSprintHistory should summarise previous sprint outcomes, carry-over, recurring blockers, and quantitative metrics when those are known.
 - Include the current active sprint team from the scrum board / assignees when known.
 - If team membership has changed, return the latest team list only.
 - watchTickets, knownRisks, knownDecisions, setupNotes, and notes must be concise and deduped.

@@ -4,12 +4,18 @@ import { MEETINGS, DEFAULT_SPRINTS } from "./config";
 import { callAI, buildContext, testProviders } from "./api";
 import {
   applyProjectSetupState,
+  composeStateFromSharedState,
   loadState,
+  loadLocalSettings,
+  loadSharedBootstrapState,
   saveState,
   STORE_KEY,
   clearDashboardData,
   defaultState,
+  extractLocalSettings,
+  extractSharedDashboardState,
   getMeetingData,
+  hasMeaningfulSharedDashboardState,
   mergeState,
 } from "./store";
 import Insights from "./Insights";
@@ -23,6 +29,17 @@ import {
   normaliseProjectProfile,
   PROJECT_SETUP_SYSTEM_PROMPT,
 } from "./projectProfile";
+import {
+  buildSharedStateSnapshot,
+  fetchSharedDashboardState,
+  hasPendingRemoteSync,
+  mergeSharedStateAcknowledgement,
+  openSharedDashboardStream,
+  pushSharedDashboardState,
+  SHARED_STATE_ENDPOINT,
+  shouldBootstrapSharedState,
+  shouldApplySharedStateSnapshot,
+} from "./sharedStateSync";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -94,6 +111,8 @@ const THEME_VARS = {
     "--app-teal-bg": "rgba(46,183,187,0.12)",
   },
 };
+
+const SYNC_CHANNEL_NAME = "scrum-intelligence-sync-v1";
 
 const RAG_STYLE = {
   GREEN: {
@@ -650,6 +669,32 @@ function formatShortDate(dateText) {
     day: "numeric",
     month: "short",
   });
+}
+
+function formatSyncTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("en-GB", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function initialSharedSyncStatus() {
+  if (process.env.NODE_ENV === "test") {
+    return {
+      mode: "local",
+      detail: "Shared sync disabled in test mode.",
+      pulledAt: null,
+    };
+  }
+
+  return {
+    mode: "checking",
+    detail: "Checking the shared dashboard connection...",
+    pulledAt: null,
+  };
 }
 
 function sprintLabel(sprint) {
@@ -1473,7 +1518,7 @@ function ActionsSec({ data, fresh, label }) {
   });
   return (
     <Sec
-      title={label || "Actions for Ali"}
+      title={label || "Actions for the Scrum lead"}
       count={items.length}
       accent={hasTodayAction ? C.red : C.amber}
       emptyLabel="✓ No immediate action needed"
@@ -1699,7 +1744,7 @@ function RefinementWorkspaceCard({ targetSprintLabel, compact = false }) {
           marginTop: "6px",
         }}
       >
-        Paste refinement transcript or meeting notes here to shape the upcoming sprint: scope candidates, carry-forward work, decision gates, dependencies, and what Ali needs to chase before commitment.
+        Paste refinement transcript or meeting notes here to shape the upcoming sprint: scope candidates, carry-forward work, decision gates, dependencies, and what the Scrum lead needs to chase before commitment.
       </div>
       <div
         style={{
@@ -2423,7 +2468,7 @@ function PlanningDash({ data, fresh, nextSprint }) {
         ))}
       </Sec>
       )}
-      <ActionsSec data={data} fresh={fresh} label="Actions for Ali" />
+      <ActionsSec data={data} fresh={fresh} label="Actions for the Scrum lead" />
       <DecisionsSec data={data} fresh={fresh} />
       <RisksSec data={data} fresh={fresh} />
       <NotesSec data={data} fresh={fresh} label={`Refinement notes for ${targetSprintLabel}`} />
@@ -2518,7 +2563,7 @@ function SprintReferenceDash({ state, sprint }) {
 
       <BlockersSec data={reference} fresh={{}} />
       <QSec data={reference} fresh={{}} label="Questions to resolve across the sprint" />
-      <ActionsSec data={reference} fresh={{}} label="Actions for Ali across the sprint" />
+      <ActionsSec data={reference} fresh={{}} label="Actions for the Scrum lead across the sprint" />
       <NextStepsSec data={reference} fresh={{}} />
       <DecisionsSec data={reference} fresh={{}} />
       <RisksSec data={reference} fresh={{}} />
@@ -3385,6 +3430,10 @@ function ProjectSetupPage({
   applyProjectSetup,
   onOpenReference,
 }) {
+  const displayProjectKey = projectProfile.projectKey || "Project";
+  const displayProjectName = projectProfile.projectName || "Run Project setup to load project context";
+  const displayEpicKey = projectContext.epic || projectProfile.projectKey || "Project context";
+
   return (
     <div className="app-dashboard-stack">
       <QuickStartGuide
@@ -3410,7 +3459,7 @@ function ProjectSetupPage({
           Project setup prompt
         </div>
         <div style={{ fontSize: "13px", color: C.text1, lineHeight: 1.7, marginBottom: "14px" }}>
-          Use this page first when starting a new dashboard or refreshing the same project. Copy the setup prompt, run it in Rovo, then paste the response below so the dashboard can load the right project, sprint, epic, and team context.
+          Use this page first when starting a new dashboard or refreshing the same project. Copy the setup prompt, run it in Rovo, then paste the response below so the dashboard can load the right project, sprint timeline, previous sprint context, epic, and team data.
         </div>
 
         <div
@@ -3422,14 +3471,15 @@ function ProjectSetupPage({
           }}
         >
           {[
-            `Current project: ${projectProfile.projectKey} — ${projectProfile.projectName}`,
-            `Primary epic: ${projectContext.epic}${projectContext.epicName ? ` — ${projectContext.epicName}` : ""}`,
-            `Sprint naming: ${projectProfile.sprintNameTemplate}`,
+            `Current project: ${displayProjectKey} — ${displayProjectName}`,
+            `Primary epic: ${displayEpicKey}${projectContext.epicName ? ` — ${projectContext.epicName}` : ""}`,
+            `Sprint naming: ${projectProfile.sprintNameTemplate || "Not configured"}`,
             projectProfile.sprintDurationDays
               ? `Sprint cadence: ${projectProfile.sprintDurationDays}-day sprint${projectProfile.sprintGapDays >= 0 ? ` · ${projectProfile.sprintGapDays} gap day${projectProfile.sprintGapDays === 1 ? "" : "s"}` : ""}`
               : null,
             projectProfile.team?.length ? `Team members known: ${projectProfile.team.length}` : null,
             projectProfile.workstreams?.length ? `Known workstreams: ${projectProfile.workstreams.length}` : null,
+            Object.keys(state.sprintSummaries || {}).length ? `Archived sprint snapshots: ${Object.keys(state.sprintSummaries || {}).length}` : null,
             state.lastUpdated
               ? `Last data update: ${state.lastUpdated}`
               : "Last data update: No saved updates yet",
@@ -3466,10 +3516,10 @@ function ProjectSetupPage({
               accent: C.blue,
               title: "What the setup should return",
               items: [
-                "Project profile and project name",
-                "Active sprint and upcoming sprint list",
+                "Project profile, delivery context, and sprint cadence",
+                "Previous, current, and next sprint timeline",
                 "Primary epic and workstreams in play",
-                "Current team members and active sprint board",
+                "Current team, active sprint board, and recent sprint history",
               ],
             },
             {
@@ -3551,7 +3601,7 @@ function ProjectSetupPage({
                 Copy setup prompt
               </div>
               <div style={{ fontSize: "11px", color: C.text2 }}>
-                One prompt to gather the project profile, sprint cadence, team, workstreams, and active sprint board in one response.
+                One prompt to gather the project profile, sprint cadence, sprint history, team, workstreams, and active sprint board in one response.
               </div>
             </div>
             <ShellButton onClick={copyProjectSetupPrompt} tone="primary">
@@ -3605,7 +3655,7 @@ function ProjectSetupPage({
           }}
         />
         <div style={{ fontSize: "11px", color: C.text2, marginTop: "8px", lineHeight: "1.6" }}>
-          Applying setup updates the project profile, sprint cadence, sprint list, current team, and active sprint board. Rerunning setup for the same project refreshes that context without wiping saved sprint data. Switching to a different project clears old meeting data, history, and insights while keeping API keys, theme, and Jira base URL.
+          Applying setup updates the project profile, sprint cadence, sprint list, previous sprint history, current team, and active sprint board. Rerunning setup for the same project refreshes that context without wiping saved sprint data. Switching to a different project clears old meeting data, history, and insights while keeping API keys, theme, and Jira base URL.
         </div>
 
         {setupStatus && (
@@ -3677,10 +3727,31 @@ function RailNavItem({ label, color, active, onClick }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const sharedSyncEnabledRef = useRef(process.env.NODE_ENV !== "test");
+  const initialLocalSettingsRef = useRef(null);
+  if (initialLocalSettingsRef.current == null) {
+    initialLocalSettingsRef.current = loadLocalSettings(DEFAULT_SPRINTS);
+  }
+  const bootstrapSharedStateRef = useRef(null);
+  if (bootstrapSharedStateRef.current == null) {
+    bootstrapSharedStateRef.current = loadSharedBootstrapState(DEFAULT_SPRINTS);
+  }
   const [state, setState] = useState(
-    () => loadState(DEFAULT_SPRINTS) || defaultState(DEFAULT_SPRINTS),
+    () => (
+      sharedSyncEnabledRef.current
+        ? composeStateFromSharedState(
+            hasMeaningfulSharedDashboardState(bootstrapSharedStateRef.current, DEFAULT_SPRINTS)
+              ? bootstrapSharedStateRef.current
+              : defaultState(DEFAULT_SPRINTS),
+            initialLocalSettingsRef.current,
+            DEFAULT_SPRINTS,
+          )
+        : loadState(DEFAULT_SPRINTS) || defaultState(DEFAULT_SPRINTS)
+    ),
   );
   const latestStateRef = useRef(state);
+  const syncChannelRef = useRef(null);
+  const sharedSyncPrimedRef = useRef(!sharedSyncEnabledRef.current);
   const themeMode = state.theme || "light";
   const themeVars = THEME_VARS[themeMode] || THEME_VARS.light;
   const [aiStatus, setAIStatus] = useState({
@@ -3702,6 +3773,7 @@ export default function App() {
     msg: "",
     err: false,
   });
+  const [sharedSyncStatus, setSharedSyncStatus] = useState(initialSharedSyncStatus);
   const [setupPaste, setSetupPaste] = useState("");
   const [setupStatus, setSetupStatus] = useState("");
   const [setupLoading, setSetupLoading] = useState(false);
@@ -3711,18 +3783,133 @@ export default function App() {
     setTimeout(() => setToast({ show: false, msg: "", err: false }), 6000);
   }, []);
 
-  const persist = useCallback((patchOrUpdater) => {
+  const updateSharedSyncStatus = useCallback((next) => {
+    setSharedSyncStatus((prev) => ({
+      ...prev,
+      ...next,
+    }));
+  }, []);
+
+  const applySharedSnapshot = useCallback((snapshot, notify = false) => {
+    if (!snapshot || typeof snapshot !== "object") return false;
+
+    const currentState = latestStateRef.current;
+    if (!shouldApplySharedStateSnapshot(snapshot, currentState)) {
+      return false;
+    }
+
+    const localSettings = extractLocalSettings(currentState, DEFAULT_SPRINTS);
+    const combined = composeStateFromSharedState(snapshot, localSettings, DEFAULT_SPRINTS);
+    const saved = saveState(combined, { preserveSavedAt: true });
+    latestStateRef.current = saved;
+    setState(saved);
+
+    if (notify) {
+      showToast("Loaded the latest shared dashboard data.");
+    }
+
+    return true;
+  }, [showToast]);
+
+  const acknowledgeSharedState = useCallback((payload) => {
+    const snapshot = buildSharedStateSnapshot(payload);
+    if (snapshot && applySharedSnapshot(snapshot, false)) {
+      return;
+    }
+
+    setState((prev) => {
+      const merged = mergeSharedStateAcknowledgement(prev, payload);
+      if (merged === prev) return prev;
+      const saved = saveState(merged, { preserveSavedAt: true });
+      latestStateRef.current = saved;
+      return saved;
+    });
+  }, [applySharedSnapshot]);
+
+  const pushLatestSharedState = useCallback(async (savedState) => {
+    if (!sharedSyncEnabledRef.current || !savedState) return;
+
+    updateSharedSyncStatus({
+      mode: "syncing",
+      detail: "Pushing the latest dashboard changes...",
+    });
+
+    try {
+      const payload = await pushSharedDashboardState(
+        extractSharedDashboardState(savedState, DEFAULT_SPRINTS),
+      );
+      sharedSyncPrimedRef.current = true;
+      acknowledgeSharedState(payload);
+      updateSharedSyncStatus({
+        mode: "connected",
+        detail: "Connected to the shared dashboard store.",
+        pulledAt: Date.now(),
+      });
+    } catch {
+      updateSharedSyncStatus({
+        mode: "offline",
+        detail: "Could not reach the shared sync server.",
+      });
+    }
+  }, [acknowledgeSharedState, updateSharedSyncStatus]);
+
+  const persistLocal = useCallback((patchOrUpdater) => {
     setState((prev) => {
       const next = mergeState(prev, patchOrUpdater, DEFAULT_SPRINTS);
-      return saveState(next);
+      const saved = saveState(next, { preserveSavedAt: true });
+      latestStateRef.current = saved;
+      try {
+        syncChannelRef.current?.postMessage({
+          type: "state-saved",
+          savedAt: saved?.savedAt || 0,
+        });
+      } catch {
+        // noop
+      }
+      return saved;
     });
   }, []);
+
+  const persist = useCallback((patchOrUpdater) => {
+    if (sharedSyncEnabledRef.current && sharedSyncStatus.mode === "offline") {
+      showToast("Shared sync is offline. Dashboard changes are blocked until the shared store reconnects.", true);
+      return false;
+    }
+
+    if (sharedSyncEnabledRef.current && !sharedSyncPrimedRef.current) {
+      showToast("Waiting for the shared dashboard to connect before applying changes.", true);
+      return false;
+    }
+
+    setState((prev) => {
+      const next = mergeState(prev, patchOrUpdater, DEFAULT_SPRINTS);
+      const sharedState = extractSharedDashboardState(next, DEFAULT_SPRINTS);
+      const localSettings = extractLocalSettings(prev, DEFAULT_SPRINTS);
+      const combined = composeStateFromSharedState(sharedState, localSettings, DEFAULT_SPRINTS);
+      const saved = saveState(combined);
+      latestStateRef.current = saved;
+      Promise.resolve().then(() => pushLatestSharedState(saved));
+      try {
+        syncChannelRef.current?.postMessage({
+          type: "state-saved",
+          savedAt: saved?.savedAt || Date.now(),
+        });
+      } catch {
+        // noop
+      }
+      return saved;
+    });
+
+    return true;
+  }, [pushLatestSharedState, sharedSyncStatus.mode, showToast]);
 
   useEffect(() => {
     latestStateRef.current = state;
   }, [state]);
 
   const syncLatestSavedState = useCallback((notify = false) => {
+    if (sharedSyncEnabledRef.current && !sharedSyncPrimedRef.current) return;
+
     const loaded = loadState(DEFAULT_SPRINTS);
     if (!loaded) return;
 
@@ -3731,11 +3918,73 @@ export default function App() {
 
     if (loadedSavedAt <= currentSavedAt) return;
 
+    latestStateRef.current = loaded;
     setState(loaded);
     if (notify) {
       showToast("Loaded the latest saved dashboard data.");
     }
   }, [showToast]);
+
+  const syncLatestSharedState = useCallback(async (notify = false) => {
+    if (!sharedSyncEnabledRef.current) return;
+
+    try {
+      const remote = await fetchSharedDashboardState();
+      sharedSyncPrimedRef.current = true;
+      const bootstrapState = bootstrapSharedStateRef.current;
+      const hasBootstrapState = hasMeaningfulSharedDashboardState(bootstrapState, DEFAULT_SPRINTS);
+
+      if (!remote?.snapshot) {
+        if (hasBootstrapState) {
+          const payload = await pushSharedDashboardState(bootstrapState);
+          acknowledgeSharedState(payload);
+          updateSharedSyncStatus({
+            mode: "connected",
+            detail: "Connected to the shared dashboard store.",
+            pulledAt: Date.now(),
+          });
+          if (notify) {
+            showToast("Loaded the latest shared dashboard data.");
+          }
+          return;
+        }
+
+        updateSharedSyncStatus({
+          mode: "connected",
+          detail: "Connected to the shared dashboard store. No remote data yet.",
+          pulledAt: Date.now(),
+        });
+        return;
+      }
+
+      if (hasBootstrapState && shouldBootstrapSharedState(bootstrapState, remote.snapshot)) {
+        const payload = await pushSharedDashboardState(bootstrapState);
+        acknowledgeSharedState(payload);
+        updateSharedSyncStatus({
+          mode: "connected",
+          detail: "Connected to the shared dashboard store.",
+          pulledAt: Date.now(),
+        });
+        if (notify) {
+          showToast("Recovered the latest saved dashboard state into the shared store.");
+        }
+        return;
+      }
+
+      updateSharedSyncStatus({
+        mode: "connected",
+        detail: "Connected to the shared dashboard store.",
+        pulledAt: Date.now(),
+      });
+
+      applySharedSnapshot(remote.snapshot, notify);
+    } catch {
+      updateSharedSyncStatus({
+        mode: "offline",
+        detail: "Could not reach the shared sync server.",
+      });
+    }
+  }, [acknowledgeSharedState, applySharedSnapshot, showToast, updateSharedSyncStatus]);
 
   useEffect(() => {
     setAIStatus((prev) => ({
@@ -3752,22 +4001,85 @@ export default function App() {
     };
 
     const handleFocus = () => syncLatestSavedState(false);
+    const handlePageShow = () => syncLatestSavedState(false);
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
         syncLatestSavedState(false);
       }
     };
+    const poll = window.setInterval(() => {
+      syncLatestSavedState(false);
+    }, 3000);
 
     window.addEventListener("storage", handleStorage);
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
+      window.clearInterval(poll);
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [syncLatestSavedState]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.BroadcastChannel === "undefined") {
+      return undefined;
+    }
+
+    const channel = new window.BroadcastChannel(SYNC_CHANNEL_NAME);
+    syncChannelRef.current = channel;
+    channel.onmessage = (event) => {
+      if (event?.data?.type === "state-saved") {
+        syncLatestSavedState(true);
+      }
+    };
+
+    return () => {
+      syncChannelRef.current = null;
+      channel.close();
+    };
+  }, [syncLatestSavedState]);
+
+  useEffect(() => {
+    if (!sharedSyncEnabledRef.current) {
+      return undefined;
+    }
+
+    void syncLatestSharedState(false);
+    const closeStream = openSharedDashboardStream(() => {
+      void syncLatestSharedState(true);
+    });
+    const poll = window.setInterval(() => {
+      void syncLatestSharedState(false);
+    }, 5000);
+    const handleFocus = () => {
+      void syncLatestSharedState(false);
+    };
+    const handlePageShow = () => {
+      void syncLatestSharedState(false);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void syncLatestSharedState(false);
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      closeStream?.();
+      window.clearInterval(poll);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [syncLatestSharedState]);
 
   const activeSprint =
     state.sprints.find((s) => s.num === state.activeSprint) || state.sprints[0];
@@ -3777,9 +4089,95 @@ export default function App() {
     ...DEFAULT_PROJECT_CONTEXT,
     ...(state.projectContext || {}),
   };
-  const projectSetupPrompt = buildProjectSetupPrompt(projectProfile, state.sprints);
+  const displayProjectKey = projectProfile.projectKey || "Project";
+  const displayProjectName = projectProfile.projectName || "Run Project setup to load project context";
+  const displayEpicKey = projectContext.epic || projectProfile.projectKey || "Project context";
+  const displayEpicName = projectContext.epicName || projectProfile.projectName || "Open Project setup to seed epic and sprint context";
+  const projectSetupPrompt = buildProjectSetupPrompt(projectProfile, state.sprints, state.sprintSummaries);
+  const remoteSyncPending = sharedSyncEnabledRef.current && hasPendingRemoteSync(state);
+  const sharedSyncCard = (() => {
+    if (!sharedSyncEnabledRef.current) {
+      return {
+        value: "Local only",
+        hint: "Shared sync is disabled in this environment.",
+        accent: C.text2,
+      };
+    }
+
+    if (sharedSyncStatus.mode === "offline") {
+      return {
+        value: "Offline",
+        hint: sharedSyncStatus.pulledAt
+          ? `Last successful pull ${formatSyncTimestamp(sharedSyncStatus.pulledAt)}`
+          : sharedSyncStatus.detail,
+        accent: C.red,
+      };
+    }
+
+    if (sharedSyncStatus.mode === "syncing" || remoteSyncPending) {
+      return {
+        value: "Syncing",
+        hint: sharedSyncStatus.pulledAt
+          ? `Last pull ${formatSyncTimestamp(sharedSyncStatus.pulledAt)}`
+          : "Pushing the latest dashboard changes...",
+        accent: C.amber,
+      };
+    }
+
+    if (sharedSyncStatus.mode === "connected") {
+      return {
+        value: "Connected",
+        hint: sharedSyncStatus.pulledAt
+          ? `Last pull ${formatSyncTimestamp(sharedSyncStatus.pulledAt)}${state.remoteRevision ? ` · Rev ${state.remoteRevision}` : ""}`
+          : "Connected to the shared dashboard store.",
+        accent: C.green,
+      };
+    }
+
+    return {
+      value: "Checking",
+      hint: sharedSyncStatus.detail || "Checking the shared dashboard connection...",
+      accent: C.blue,
+    };
+  })();
+  const sharedSyncLocked =
+    sharedSyncEnabledRef.current &&
+    (sharedSyncStatus.mode === "offline" || !sharedSyncPrimedRef.current);
+  const sharedSyncLockMessage = sharedSyncStatus.mode === "offline"
+    ? "Shared dashboard unavailable. This instance is read-only until it reconnects."
+    : "Connecting to the shared dashboard. Editing stays locked until the latest shared state is loaded.";
+  const sharedSyncLockHint = `Sync endpoint: ${SHARED_STATE_ENDPOINT}`;
   const reviewPromptContext =
     (state.reviewPromptContext || {})[state.activeSprint] || {};
+  const recentSprintHistoryForAI = Object.entries(state.sprintSummaries || {})
+    .map(([num, summary]) => {
+      const setupHistory = summary?.setupHistory || {};
+      const metrics = setupHistory?.metrics
+        ? [
+            setupHistory.metrics.completedPoints != null || setupHistory.metrics.committedPoints != null
+              ? `Points ${setupHistory.metrics.completedPoints ?? "—"}/${setupHistory.metrics.committedPoints ?? "—"}`
+              : null,
+            setupHistory.metrics.completedTickets != null || setupHistory.metrics.committedTickets != null
+              ? `Tickets ${setupHistory.metrics.completedTickets ?? "—"}/${setupHistory.metrics.committedTickets ?? "—"}`
+              : null,
+          ].filter(Boolean).join(" · ")
+        : "";
+
+      return {
+        num: Number(num),
+        label: summary?.label || `Sprint ${num}`,
+        outcome:
+          setupHistory?.summary ||
+          summary?.velocity?.summary ||
+          summary?.meetings?.[0]?.summary ||
+          summary?.summary ||
+          "Outcome not recorded",
+        metrics,
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.num))
+    .sort((a, b) => b.num - a.num)
+    .slice(0, 3);
   const isReference = curMeeting === "reference";
   const isSetup = curMeeting === "setup";
   const meeting = SPECIAL_VIEWS[curMeeting] || MEETINGS[curMeeting] || MEETINGS["standup"];
@@ -3817,14 +4215,14 @@ export default function App() {
 
   const setThemeMode = (mode) => {
     if (mode === themeMode) return;
-    persist({ theme: mode });
+    persistLocal({ theme: mode });
   };
 
   const clearCurrentMeeting = useCallback(() => {
     const sprintLabel = activeSprint?.name || `Sprint ${state.activeSprint}`;
     if (!window.confirm(`Clear ${meeting.label} input and saved output for ${sprintLabel}?`)) return;
 
-    persist((prev) => {
+    const applied = persist((prev) => {
       const key = `${prev.activeSprint}_${curMeeting}`;
       const nextMeetingData = { ...(prev.meetingData || {}) };
       delete nextMeetingData[key];
@@ -3832,6 +4230,7 @@ export default function App() {
         meetingData: nextMeetingData,
       };
     });
+    if (!applied) return;
 
     setFresh({});
     setRovoPaste("");
@@ -3878,7 +4277,7 @@ export default function App() {
   const archiveSprint = useCallback((sprint) => {
     if (!sprint) return;
     if (!window.confirm(`Archive Sprint ${sprint.num}?`)) return;
-    persist((prev) => ({
+    const applied = persist((prev) => ({
       sprintSummaries: {
         ...prev.sprintSummaries,
         [sprint.num]: buildSprintArchiveSnapshot(
@@ -3889,6 +4288,7 @@ export default function App() {
         ),
       },
     }));
+    if (!applied) return;
     showToast(`Sprint ${sprint.num} snapshot archived.`);
   }, [persist, showToast]);
 
@@ -3897,7 +4297,7 @@ export default function App() {
     if (!window.confirm(`End Sprint ${sprint.num}? This will archive the sprint summary and move to the next sprint.`)) return;
     let movedTo = null;
     let movedToLabel = null;
-    persist((prev) => {
+    const applied = persist((prev) => {
       let sorted = [...(prev.sprints || [])].sort((a, b) => a.num - b.num);
       let nextSprint = sorted.find((item) => item.num > sprint.num) || null;
       if (!nextSprint) {
@@ -3920,6 +4320,7 @@ export default function App() {
         activeSprint: nextSprint?.num || prev.activeSprint,
       };
     });
+    if (!applied) return;
     showToast(
       movedTo
         ? `Sprint ${sprint.num} archived. Switched to ${movedToLabel || `Sprint ${movedTo}`}.`
@@ -4031,7 +4432,12 @@ export default function App() {
         return;
       }
 
-      persist((prev) => applyProjectSetupState(prev, parsed, DEFAULT_SPRINTS));
+      const applied = persist((prev) => applyProjectSetupState(prev, parsed, DEFAULT_SPRINTS));
+      if (!applied) {
+        setSetupStatus("Shared dashboard unavailable. Reconnect before applying setup.");
+        setSetupLoading(false);
+        return;
+      }
       setCur("standup");
       setFresh({});
       setRovoPaste("");
@@ -4075,7 +4481,7 @@ export default function App() {
       const newFresh = {};
       const mergePolicy = meetingMergePolicy(curMeeting, source);
 
-      setState((prev) => {
+      const applied = persist((prev) => {
         const next = { ...prev, lastUpdated: ts };
         const key = `${next.activeSprint}_${curMeeting}`;
         const d = getMeetingData(next, next.activeSprint, curMeeting);
@@ -4188,16 +4594,17 @@ export default function App() {
           },
         ];
         next.meetingData = { ...next.meetingData, [key]: d };
-        return saveState(next);
+        return next;
       });
+      if (!applied) return null;
 
       setFresh(newFresh);
       return parsed.summary;
     },
-    [curMeeting, meeting],
+    [curMeeting, meeting, persist],
   );
 
-  const process = useCallback(
+  const runCapture = useCallback(
     async (tool) => {
       const text = tool === "rovo" ? rovoPaste : notesPaste;
       const setStatus = tool === "rovo" ? setRovoSt : setNotesSt;
@@ -4225,6 +4632,8 @@ export default function App() {
           epic: projectContext.epic,
           name: projectContext.epicName || projectProfile.projectName,
           nextSprint,
+          recentSprintHistory: recentSprintHistoryForAI,
+          lastUpdated: state.lastUpdated,
         });
         const parsed = await callAI(
           ctx,
@@ -4234,7 +4643,7 @@ export default function App() {
             if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
             if (provider === "groq" || provider === "cerebras") {
               resolvedProvider = provider;
-              persist({ apiProvider: provider });
+              persistLocal({ apiProvider: provider });
             }
             setStatus(msg);
           },
@@ -4256,13 +4665,13 @@ export default function App() {
         setStatus(successMessage);
         showToast(successMessage);
       } catch (e) {
-        persist({ apiProvider: "none" });
+        persistLocal({ apiProvider: "none" });
         setStatus("Error: " + e.message);
         showToast(e.message, true);
       }
       setLoad(false);
     },
-    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persist, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, showToast],
+    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persistLocal, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, recentSprintHistoryForAI, showToast],
   );
 
   const switchMeeting = (id) => {
@@ -4436,10 +4845,10 @@ export default function App() {
               Scrum Intelligence
             </div>
             <div style={{ fontSize: "28px", fontWeight: "800", letterSpacing: "-0.04em", marginBottom: "8px" }}>
-              {projectProfile.projectKey}
+              {displayProjectKey}
             </div>
             <div style={{ fontSize: "13px", color: C.text1, lineHeight: 1.6 }}>
-              {projectProfile.projectName}
+              {displayProjectName}
             </div>
           </div>
 
@@ -4510,7 +4919,8 @@ export default function App() {
             <ShellButton
               onClick={() => {
                 if (window.confirm("Clear dashboard data? Saved API keys and settings will be kept.")) {
-                  persist((prev) => clearDashboardData(prev, DEFAULT_SPRINTS));
+                  const applied = persist((prev) => clearDashboardData(prev, DEFAULT_SPRINTS));
+                  if (!applied) return;
                   setFresh({});
                   setRovoPaste("");
                   setNotes("");
@@ -4537,8 +4947,8 @@ export default function App() {
                 {projectProfile.projectLabel || "Project"}
               </div>
               <div style={{ fontSize: "12px", color: C.text1, lineHeight: 1.6 }}>
-                {projectContext.epic}
-                {projectContext.epicName ? ` · ${projectContext.epicName}` : ""}
+                {displayEpicKey}
+                {projectContext.epicName ? ` · ${projectContext.epicName}` : projectProfile.projectName ? ` · ${projectProfile.projectName}` : ""}
               </div>
             </div>
           </div>
@@ -4581,7 +4991,7 @@ export default function App() {
                   </span>
                 </div>
                 <ShellButton
-                  onClick={() => persist({ connectionTipDismissed: true })}
+                  onClick={() => persistLocal({ connectionTipDismissed: true })}
                   tone="subtle"
                   style={{ padding: "7px 12px", borderRadius: "10px" }}
                 >
@@ -4701,6 +5111,29 @@ export default function App() {
               </div>
             )}
 
+            {sharedSyncLocked && (
+              <div
+                style={{
+                  marginBottom: "18px",
+                  padding: "14px 16px",
+                  borderRadius: "18px",
+                  background: sharedSyncStatus.mode === "offline" ? C.redBg : C.blueBg,
+                  border: `1px solid ${sharedSyncStatus.mode === "offline" ? C.red : C.blue}`,
+                  color: sharedSyncStatus.mode === "offline" ? "#fda4af" : "#93c5fd",
+                }}
+              >
+                <div style={{ fontSize: "12px", fontWeight: "800", letterSpacing: ".08em", textTransform: "uppercase" }}>
+                  Shared dashboard required
+                </div>
+                <div style={{ fontSize: "13px", fontWeight: "700", marginTop: "6px" }}>
+                  {sharedSyncLockMessage}
+                </div>
+                <div style={{ fontSize: "12px", lineHeight: 1.6, marginTop: "6px", color: C.text1 }}>
+                  {sharedSyncLockHint}
+                </div>
+              </div>
+            )}
+
             {!isSetup && (
               <>
                 <div className="app-filter-grid">
@@ -4713,8 +5146,8 @@ export default function App() {
                   />
                   <SummaryFilterCard
                     label="Epic"
-                    value={projectContext.epic || projectProfile.projectKey}
-                    hint={projectContext.epicName || projectProfile.projectName}
+                    value={displayEpicKey}
+                    hint={displayEpicName}
                     accent={C.blue}
                     onClick={() => switchMeeting("setup")}
                   />
@@ -4727,8 +5160,14 @@ export default function App() {
                   <SummaryFilterCard
                     label="Last updated"
                     value={state.lastUpdated || "No saved updates yet"}
-                    hint="Latest saved dashboard data across browser tabs"
+                    hint="Latest shared dashboard data across connected instances"
                     accent={state.lastUpdated ? C.green : C.text2}
+                  />
+                  <SummaryFilterCard
+                    label="Shared sync"
+                    value={sharedSyncCard.value}
+                    hint={sharedSyncCard.hint}
+                    accent={sharedSyncCard.accent}
                   />
                 </div>
 
@@ -4831,7 +5270,7 @@ export default function App() {
                           pastePlaceholder="Paste the Rovo response here..."
                           status={rovoStatus}
                           loading={rovoLoading}
-                          onProcess={() => process("rovo")}
+                          onProcess={() => runCapture("rovo")}
                           btnBg="#0052cc"
                         />
                       )}
@@ -4847,7 +5286,7 @@ export default function App() {
                           pastePlaceholder="Paste meeting notes, transcript, or summary here..."
                           status={notesStatus}
                           loading={notesLoading}
-                          onProcess={() => process("notes")}
+                          onProcess={() => runCapture("notes")}
                           btnBg="#0e9488"
                         />
                       )}
@@ -5040,7 +5479,7 @@ export default function App() {
                   primary: syncProviderStatus(null, !!gr),
                   fallback: syncProviderStatus(null, !!ce),
                 });
-                persist({
+                persistLocal({
                   groqKey: gr,
                   cerebrasKey: ce,
                   jiraBase: jira,
@@ -5329,6 +5768,28 @@ export default function App() {
                     <div style={{ fontSize: "11px", color: C.text1, marginTop: "6px" }}>
                       {s.projectContext.epic}
                       {s.projectContext.epicName ? ` · ${s.projectContext.epicName}` : ""}
+                    </div>
+                  )}
+                  {s.setupHistory && (
+                    <div style={{ marginTop: "10px", fontSize: "12px", lineHeight: "1.5" }}>
+                      <div style={{ fontWeight: "600", color: C.text0 }}>
+                        Imported sprint context
+                      </div>
+                      {s.setupHistory.goal && (
+                        <div style={{ color: C.text1 }}>
+                          Goal: {s.setupHistory.goal}
+                        </div>
+                      )}
+                      {s.setupHistory.status && (
+                        <div style={{ color: C.text2, marginTop: "3px" }}>
+                          Outcome: {s.setupHistory.status}
+                        </div>
+                      )}
+                      {s.setupHistory.metrics && (
+                        <div style={{ color: C.text2, marginTop: "3px" }}>
+                          Points {s.setupHistory.metrics.completedPoints ?? "—"}/{s.setupHistory.metrics.committedPoints ?? "—"} · Tickets {s.setupHistory.metrics.completedTickets ?? "—"}/{s.setupHistory.metrics.committedTickets ?? "—"}
+                        </div>
+                      )}
                     </div>
                   )}
                   {(s.meetings || []).length > 0 && (

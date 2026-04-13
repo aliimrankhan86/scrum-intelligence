@@ -378,6 +378,21 @@ export function buildContext(meeting, sprint, project) {
   const knownDecisions = Array.isArray(project.knownDecisions) && project.knownDecisions.length
     ? project.knownDecisions.join(' | ')
     : 'None recorded';
+  const watchTickets = Array.isArray(project.watchTickets) && project.watchTickets.length
+    ? project.watchTickets.join(' | ')
+    : 'None recorded';
+  const recentSprintHistory = Array.isArray(project.recentSprintHistory) && project.recentSprintHistory.length
+    ? project.recentSprintHistory
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        const label = entry.label || entry.name || (entry.num != null ? `Sprint ${entry.num}` : 'Recent sprint');
+        const outcome = entry.outcome || entry.summary || entry.status || 'Outcome not recorded';
+        const metrics = entry.metrics || '';
+        return `${label}: ${outcome}${metrics ? ` (${metrics})` : ''}`;
+      })
+      .join(' | ')
+    : 'None recorded';
+  const lastDashboardUpdate = project.lastUpdated || 'Not recorded';
 
   return `CONTEXT FOR AI:
 Project: ${projectName} (Primary epic ${primaryEpic} — ${primaryEpicName})
@@ -389,8 +404,11 @@ Meeting type: ${meeting.label}
 Workstreams / epics in play: ${workstreams}
 Team: ${team}
 Stakeholders: ${stakeholders}
+Priority watch tickets: ${watchTickets}
+Recent sprint history: ${recentSprintHistory}
 Known risks: ${knownRisks}
 Confirmed decisions: ${knownDecisions}
+Last dashboard update: ${lastDashboardUpdate}
 
 ${meeting.systemPrompt}`;
 }

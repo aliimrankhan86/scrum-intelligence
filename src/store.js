@@ -171,6 +171,147 @@ function deriveBoardMetrics(board) {
   };
 }
 
+function cleanMetricValue(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function deriveBoardWorkstreams(board) {
+  const seen = new Set();
+  return [
+    ...(Array.isArray(board?.epicsInPlay) ? board.epicsInPlay : []),
+    ...(Array.isArray(board?.ticketsDone) ? board.ticketsDone : []),
+    ...(Array.isArray(board?.ticketsInProgress) ? board.ticketsInProgress : []),
+    ...(Array.isArray(board?.ticketsInReview) ? board.ticketsInReview : []),
+    ...(Array.isArray(board?.ticketsBlocked) ? board.ticketsBlocked : []),
+    ...(Array.isArray(board?.ticketsTodo) ? board.ticketsTodo : []),
+    ...(Array.isArray(board?.blockers) ? board.blockers : []),
+  ]
+    .map((item) => ({
+      epic: textValue(item?.epic),
+      epicName: textValue(item?.epicName),
+      focus: textValue(item?.focus || item?.deliveryNote),
+    }))
+    .filter((item) => item.epic || item.epicName)
+    .filter((item) => {
+      const key = `${item.epic}|${item.epicName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function deriveBoardTeam(board) {
+  const seen = new Set();
+  return [
+    ...(Array.isArray(board?.ticketsDone) ? board.ticketsDone : []),
+    ...(Array.isArray(board?.ticketsInProgress) ? board.ticketsInProgress : []),
+    ...(Array.isArray(board?.ticketsInReview) ? board.ticketsInReview : []),
+    ...(Array.isArray(board?.ticketsBlocked) ? board.ticketsBlocked : []),
+    ...(Array.isArray(board?.ticketsTodo) ? board.ticketsTodo : []),
+    ...(Array.isArray(board?.blockers) ? board.blockers : []),
+  ]
+    .map((item) => textValue(item?.assignee))
+    .filter((name) => name && name.toLowerCase() !== 'unassigned')
+    .filter((name) => {
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    })
+    .map((name) => ({
+      name,
+      role: 'Current sprint contributor',
+    }));
+}
+
+function cleanSetupHistoryMetrics(metrics) {
+  if (!metrics || typeof metrics !== 'object') return null;
+  const cleaned = {
+    committedPoints: cleanMetricValue(metrics.committedPoints),
+    completedPoints: cleanMetricValue(metrics.completedPoints),
+    committedTickets: cleanMetricValue(metrics.committedTickets),
+    completedTickets: cleanMetricValue(metrics.completedTickets),
+  };
+  const hasAnyValue = Object.values(cleaned).some((value) => value != null);
+  return hasAnyValue ? cleaned : null;
+}
+
+function buildImportedSprintHistorySummary(item, projectContext, importedAt) {
+  const num = Number(item?.num);
+  if (!Number.isFinite(num)) return null;
+
+  const label = textValue(item?.name) || `Sprint ${num}`;
+  const summary = textValue(item?.summary) || textValue(item?.goal) || 'Imported sprint history from project setup';
+  const goal = textValue(item?.goal);
+  const status = textValue(item?.status);
+  const carryOver = cleanUniqueStrings(item?.carryOver);
+  const completedHighlights = cleanUniqueStrings(item?.completedHighlights);
+  const risks = cleanUniqueStrings(item?.risks);
+  const metrics = cleanSetupHistoryMetrics(item?.metrics);
+  const highlights = [
+    ...completedHighlights.map((entry) => `Delivered: ${entry}`),
+    ...carryOver.map((entry) => `Carry-over: ${entry}`),
+    ...risks.map((entry) => `Risk: ${entry}`),
+  ].slice(0, 4);
+
+  const metricSummary = metrics
+    ? [
+        metrics.committedPoints != null || metrics.completedPoints != null
+          ? `Points ${metrics.completedPoints ?? '—'}/${metrics.committedPoints ?? '—'} completed`
+          : null,
+        metrics.committedTickets != null || metrics.completedTickets != null
+          ? `Tickets ${metrics.completedTickets ?? '—'}/${metrics.committedTickets ?? '—'} completed`
+          : null,
+      ].filter(Boolean).join(' · ')
+    : '';
+
+  return {
+    num,
+    summary: {
+      label,
+      archivedAt: textValue(item?.end) || importedAt,
+      projectContext,
+      meetings: [
+        {
+          id: 'setup-history',
+          label: 'Imported sprint history',
+          summary,
+          highlights,
+          updatedAt: textValue(item?.end) || importedAt,
+        },
+      ],
+      velocity: metricSummary || status
+        ? {
+            summary: metricSummary || summary,
+            recommendation: status ? `Outcome: ${status}` : '',
+          }
+        : null,
+      setupHistory: {
+        goal,
+        status,
+        summary,
+        carryOver,
+        completedHighlights,
+        risks,
+        metrics,
+      },
+    },
+  };
+}
+
+function buildImportedSprintHistorySummaries(items, projectContext, activeSprint) {
+  const importedAt = new Date().toISOString();
+  return (Array.isArray(items) ? items : []).reduce((acc, item) => {
+    const next = buildImportedSprintHistorySummary(item, projectContext, importedAt);
+    if (!next) return acc;
+    if (Number.isFinite(Number(activeSprint)) && next.num >= Number(activeSprint)) {
+      return acc;
+    }
+    acc[next.num] = next.summary;
+    return acc;
+  }, {});
+}
+
 export function createEmptyMeetingData() {
   return {
     metrics: { todo: null, inprog: null, inreview: null, blocked: null, done: null, total: null, health: null },
@@ -289,7 +430,78 @@ export function hydrateState(rawState, defaultSprints) {
     projectSetupNotes: Array.isArray(rawState.projectSetupNotes) ? rawState.projectSetupNotes : base.projectSetupNotes,
     lastUpdated: rawState.lastUpdated || null,
     savedAt: Number.isFinite(Number(rawState.savedAt)) ? Number(rawState.savedAt) : null,
+    remoteRevision: Number.isFinite(Number(rawState.remoteRevision)) ? Number(rawState.remoteRevision) : 0,
+    remoteUpdatedAt: Number.isFinite(Number(rawState.remoteUpdatedAt)) ? Number(rawState.remoteUpdatedAt) : null,
+    remoteSavedAt: Number.isFinite(Number(rawState.remoteSavedAt)) ? Number(rawState.remoteSavedAt) : null,
   };
+}
+
+export function extractLocalSettings(rawState, defaultSprints) {
+  const state = hydrateState(rawState, defaultSprints);
+  return {
+    theme: state.theme,
+    groqKey: state.groqKey,
+    cerebrasKey: state.cerebrasKey,
+    jiraBase: state.jiraBase,
+    apiProvider: state.apiProvider,
+    connectionTipDismissed: state.connectionTipDismissed,
+  };
+}
+
+export function extractSharedDashboardState(rawState, defaultSprints) {
+  const state = hydrateState(rawState, defaultSprints);
+  const {
+    theme,
+    groqKey,
+    cerebrasKey,
+    jiraBase,
+    apiProvider,
+    connectionTipDismissed,
+    remoteRevision,
+    remoteUpdatedAt,
+    remoteSavedAt,
+    ...sharedState
+  } = state;
+
+  return sharedState;
+}
+
+export function composeStateFromSharedState(sharedState, localSettings, defaultSprints) {
+  return hydrateState(
+    {
+      ...(sharedState || {}),
+      ...(localSettings || {}),
+    },
+    defaultSprints,
+  );
+}
+
+export function loadLocalSettings(defaultSprints) {
+  const loaded = loadState(defaultSprints);
+  return extractLocalSettings(loaded || defaultState(defaultSprints), defaultSprints);
+}
+
+export function loadSharedBootstrapState(defaultSprints) {
+  const loaded = loadState(defaultSprints);
+  if (!loaded) return null;
+  return extractSharedDashboardState(loaded, defaultSprints);
+}
+
+export function hasMeaningfulSharedDashboardState(rawState, defaultSprints) {
+  const state = extractSharedDashboardState(rawState, defaultSprints);
+  const base = extractSharedDashboardState(defaultState(defaultSprints), defaultSprints);
+
+  if (state.lastUpdated || state.projectSetupAppliedAt) return true;
+  if (Object.keys(state.meetingData || {}).length) return true;
+  if (Object.keys(state.reviewPromptContext || {}).length) return true;
+  if (Object.keys(state.sprintSummaries || {}).length) return true;
+  if (Array.isArray(state.projectSetupNotes) && state.projectSetupNotes.length) return true;
+  if (state.activeSprint !== base.activeSprint) return true;
+  if (JSON.stringify(state.sprints || []) !== JSON.stringify(base.sprints || [])) return true;
+  if (JSON.stringify(state.projectProfile || {}) !== JSON.stringify(base.projectProfile || {})) return true;
+  if (JSON.stringify(state.projectContext || {}) !== JSON.stringify(base.projectContext || {})) return true;
+
+  return false;
 }
 
 export function mergeState(prevState, patchOrUpdater, defaultSprints) {
@@ -335,12 +547,14 @@ export function loadState(defaultSprints) {
   }
 }
 
-export function saveState(state) {
+export function saveState(state, options = {}) {
   try {
-    const next = {
-      ...state,
-      savedAt: Date.now(),
-    };
+    const next = options.preserveSavedAt
+      ? { ...state }
+      : {
+          ...state,
+          savedAt: Date.now(),
+        };
     localStorage.setItem(STORE_KEY, JSON.stringify(next));
     return next;
   } catch (e) {
@@ -375,6 +589,9 @@ export function defaultState(defaultSprints) {
     projectSetupNotes: [],
     lastUpdated: null,
     savedAt: null,
+    remoteRevision: 0,
+    remoteUpdatedAt: null,
+    remoteSavedAt: null,
   };
 }
 
@@ -393,6 +610,9 @@ export function clearDashboardData(state, defaultSprints) {
     connectionTipDismissed: state.connectionTipDismissed || false,
     projectSetupAppliedAt: state.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(state.projectSetupNotes) ? state.projectSetupNotes : [],
+    remoteRevision: Number.isFinite(Number(state.remoteRevision)) ? Number(state.remoteRevision) : 0,
+    remoteUpdatedAt: Number.isFinite(Number(state.remoteUpdatedAt)) ? Number(state.remoteUpdatedAt) : null,
+    remoteSavedAt: Number.isFinite(Number(state.remoteSavedAt)) ? Number(state.remoteSavedAt) : null,
     velocityData: undefined,
   };
 }
@@ -409,6 +629,7 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
   const current = hydrateState(prevState, defaultSprints);
   const currentProfile = normaliseProjectProfile(current.projectProfile, { useDefaults: false });
   const parsedProfile = parsed?.projectProfile || {};
+  const activeSprintBoard = parsed?.activeSprintBoard || {};
   const cleanText = (value) => (value == null ? '' : String(value).trim());
   const projectKeyHint = cleanText(parsedProfile?.projectKey || parsed?.projectContext?.projectKey);
   const primaryEpicHint = cleanText(parsedProfile?.primaryEpic || parsed?.projectContext?.epic);
@@ -418,15 +639,11 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
     (primaryEpicHint && primaryEpicHint !== current.projectProfile?.primaryEpic) ||
     (projectNameHint && projectNameHint !== current.projectProfile?.projectName);
 
+  const boardWorkstreams = deriveBoardWorkstreams(activeSprintBoard);
+  const boardTeam = deriveBoardTeam(activeSprintBoard);
   const setupWorkstreams = (Array.isArray(parsedProfile?.workstreams) && parsedProfile.workstreams.length)
     ? parsedProfile.workstreams
-    : (Array.isArray(parsed?.activeSprintBoard?.epicsInPlay)
-      ? parsed.activeSprintBoard.epicsInPlay.map((item) => ({
-          epic: item?.epic,
-          epicName: item?.epicName,
-          focus: item?.focus || item?.deliveryNote,
-        }))
-      : []);
+    : boardWorkstreams;
 
   const baseProfile = projectChanged ? {} : currentProfile;
   const incomingProfile = normaliseProjectProfile({
@@ -435,7 +652,9 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
     workstreams: setupWorkstreams.length
       ? setupWorkstreams
       : (Array.isArray(parsedProfile?.workstreams) && parsedProfile.workstreams.length ? parsedProfile.workstreams : baseProfile.workstreams),
-    team: Array.isArray(parsedProfile?.team) && parsedProfile.team.length ? parsedProfile.team : baseProfile.team,
+    team: Array.isArray(parsedProfile?.team) && parsedProfile.team.length
+      ? parsedProfile.team
+      : (boardTeam.length ? boardTeam : baseProfile.team),
     stakeholders: Array.isArray(parsedProfile?.stakeholders) && parsedProfile.stakeholders.length ? parsedProfile.stakeholders : baseProfile.stakeholders,
     watchTickets: Array.isArray(parsedProfile?.watchTickets) && parsedProfile.watchTickets.length ? parsedProfile.watchTickets : baseProfile.watchTickets,
     knownRisks: Array.isArray(parsedProfile?.knownRisks) && parsedProfile.knownRisks.length ? parsedProfile.knownRisks : baseProfile.knownRisks,
@@ -450,7 +669,17 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
     ...(parsed?.projectContext || {}),
   };
 
-  const incomingSprints = normaliseSprints(parsed?.sprints, incomingProfile);
+  const historySprintFrames = (Array.isArray(parsed?.recentSprintHistory) ? parsed.recentSprintHistory : []).map((item) => ({
+    num: item?.num,
+    name: item?.name,
+    start: item?.start,
+    end: item?.end,
+    active: false,
+  }));
+  const incomingSprints = normaliseSprints([
+    ...historySprintFrames,
+    ...(Array.isArray(parsed?.sprints) ? parsed.sprints : []),
+  ], incomingProfile);
   const fallbackSprints = projectChanged ? [] : current.sprints;
   let nextSprints = incomingSprints.length ? incomingSprints : fallbackSprints;
   const incomingActiveSprint = Number(parsed?.activeSprint);
@@ -470,10 +699,11 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
 
   const appliedAt = new Date().toISOString();
   const nextMeetingData = projectChanged ? {} : { ...(current.meetingData || {}) };
-  const seededStandup = buildProjectSetupMeetingData(parsed?.activeSprintBoard, appliedAt);
+  const seededStandup = buildProjectSetupMeetingData(activeSprintBoard, appliedAt);
   if (seededStandup && activeSprint) {
     nextMeetingData[`${activeSprint}_standup`] = seededStandup;
   }
+  const importedSprintSummaries = buildImportedSprintHistorySummaries(parsed?.recentSprintHistory, incomingContext, activeSprint);
 
   return {
     ...current,
@@ -486,7 +716,10 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
     activeSprint,
     reviewPromptContext: projectChanged ? {} : current.reviewPromptContext,
     meetingData: nextMeetingData,
-    sprintSummaries: projectChanged ? {} : current.sprintSummaries,
+    sprintSummaries: {
+      ...(projectChanged ? {} : current.sprintSummaries),
+      ...importedSprintSummaries,
+    },
     velocityData: projectChanged ? undefined : current.velocityData,
     projectSetupAppliedAt: appliedAt,
     projectSetupNotes: cleanUniqueStrings(parsed?.setupNotes),
