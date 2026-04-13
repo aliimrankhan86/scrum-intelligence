@@ -21,7 +21,7 @@ Meeting-note input is flexible by design. It works with Hedy, Apple Notes, Teams
 - Project-adaptive, not permanently tied to one programme
 - Shared-dashboard first, so every connected instance sees the same latest state
 - Ceremony-specific inputs with one cross-sprint reference view
-- User-supplied AI keys only
+- User-supplied AI keys only, with multiple provider options
 - Reusable for other teams, as long as they can provide Jira / Rovo setup data and meeting notes
 
 ## Functionality
@@ -43,6 +43,11 @@ Meeting-note input is flexible by design. It works with Hedy, Apple Notes, Teams
 5. Paste the response once and apply setup.
 6. Add your own keys in `API keys`.
 7. Open `Daily standup` and use the Rovo prompt plus meeting notes input to keep the dashboard current.
+
+Supported AI provider order:
+- Groq first
+- OpenRouter second, defaulting to `google/gemma-4-31b-it:free`
+- Cerebras last as the final fallback
 
 The setup prompt is designed to gather:
 - project profile and workstreams / epics
@@ -76,7 +81,7 @@ Any instance connected to the same sync server will pull the latest saved dashbo
 
 How the shared-state model works:
 - The shared SQLite store is the source of truth for project, sprint, meeting, and dashboard data.
-- Browser local storage keeps local-only settings such as theme, API keys, Jira base URL, and a local backup of the last saved dashboard state.
+- Browser local storage keeps local-only settings such as theme, API keys, OpenRouter model selection, Jira base URL, and a local backup of the last saved dashboard state.
 - On startup, the app connects to the shared store and loads the latest shared snapshot.
 - If the shared store is empty, the newest surviving local dashboard backup seeds the shared store automatically.
 - If the shared store already has data but a local backup is newer, the newer local backup is restored into the shared store automatically.
@@ -154,6 +159,7 @@ npm run build
 
 - No API keys are committed to this repository.
 - Keys are entered by the user in the app UI and stored only in that browser's local storage.
+- OpenRouter is supported as an optional extra provider. The default model is Gemma 4, but the model ID is editable in the UI if you want another OpenRouter-compatible chat model.
 - If someone downloads this repository, they must use their own keys.
 - This is safe for local/private use and repo sharing.
 - For public multi-user deployment, use a backend or proxy if keys must remain secret from end users.

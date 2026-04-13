@@ -5,6 +5,7 @@ import {
   normaliseProjectProfile,
   normaliseSprints,
 } from './projectProfile';
+import { resolveOpenRouterModelId } from './aiProviders';
 
 // ─── Local storage state management ──────────────────────────────────────────
 export const STORE_KEY = 'scrum_intelligence_v8';
@@ -422,6 +423,8 @@ export function hydrateState(rawState, defaultSprints) {
       ...(rawState.projectContext || {}),
     },
     groqKey: rawState.groqKey || '',
+    openrouterKey: rawState.openrouterKey || '',
+    openrouterModel: resolveOpenRouterModelId(rawState.openrouterModel),
     cerebrasKey: rawState.cerebrasKey || '',
     jiraBase: rawState.jiraBase || '',
     apiProvider: rawState.apiProvider || 'none',
@@ -441,6 +444,8 @@ export function extractLocalSettings(rawState, defaultSprints) {
   return {
     theme: state.theme,
     groqKey: state.groqKey,
+    openrouterKey: state.openrouterKey,
+    openrouterModel: state.openrouterModel,
     cerebrasKey: state.cerebrasKey,
     jiraBase: state.jiraBase,
     apiProvider: state.apiProvider,
@@ -453,6 +458,8 @@ export function extractSharedDashboardState(rawState, defaultSprints) {
   const {
     theme,
     groqKey,
+    openrouterKey,
+    openrouterModel,
     cerebrasKey,
     jiraBase,
     apiProvider,
@@ -581,6 +588,8 @@ export function defaultState(defaultSprints) {
     projectProfile,
     projectContext,
     groqKey: '',
+    openrouterKey: '',
+    openrouterModel: resolveOpenRouterModelId(),
     cerebrasKey: '',
     jiraBase: '',         // e.g. https://yourorg.atlassian.net/browse
     apiProvider: 'none',
@@ -605,6 +614,8 @@ export function clearDashboardData(state, defaultSprints) {
     projectProfile: state.projectProfile || base.projectProfile,
     projectContext: state.projectContext || deriveProjectContextFromProfile(state.projectProfile || base.projectProfile),
     groqKey: state.groqKey || '',
+    openrouterKey: state.openrouterKey || '',
+    openrouterModel: resolveOpenRouterModelId(state.openrouterModel),
     cerebrasKey: state.cerebrasKey || '',
     jiraBase: state.jiraBase || '',
     connectionTipDismissed: state.connectionTipDismissed || false,

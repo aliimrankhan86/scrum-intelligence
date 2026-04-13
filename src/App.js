@@ -3,6 +3,13 @@ import "./App.css";
 import { MEETINGS, DEFAULT_SPRINTS } from "./config";
 import { callAI, buildContext, testProviders } from "./api";
 import {
+  AI_PROVIDER_ORDER,
+  CEREBRAS_PROVIDER,
+  GROQ_PROVIDER,
+  OPENROUTER_PROVIDER,
+  resolveOpenRouterModelId,
+} from "./aiProviders";
+import {
   applyProjectSetupState,
   composeStateFromSharedState,
   loadState,
@@ -64,6 +71,12 @@ const C = {
   redBg: "var(--app-red-bg)",
   teal: "var(--app-teal)",
   tealBg: "var(--app-teal-bg)",
+};
+
+const AI_PROVIDER_META = {
+  groq: { label: GROQ_PROVIDER.label, chipLabel: GROQ_PROVIDER.chipLabel, dot: GROQ_PROVIDER.accent },
+  openrouter: { label: OPENROUTER_PROVIDER.label, chipLabel: OPENROUTER_PROVIDER.chipLabel, dot: OPENROUTER_PROVIDER.accent },
+  cerebras: { label: CEREBRAS_PROVIDER.label, chipLabel: CEREBRAS_PROVIDER.chipLabel, dot: CEREBRAS_PROVIDER.accent },
 };
 
 const THEME_VARS = {
@@ -3756,8 +3769,9 @@ export default function App() {
   const themeMode = state.theme || "light";
   const themeVars = THEME_VARS[themeMode] || THEME_VARS.light;
   const [aiStatus, setAIStatus] = useState({
-    primary: { state: "no_key", detail: "No Groq key saved" },
-    fallback: { state: "no_key", detail: "No Cerebras key saved" },
+    groq: { state: "no_key", detail: "No Groq key saved" },
+    openrouter: { state: "no_key", detail: "No OpenRouter key saved" },
+    cerebras: { state: "no_key", detail: "No Cerebras key saved" },
   });
   const [curMeeting, setCur] = useState("standup");
   const [rovoPaste, setRovoPaste] = useState("");
@@ -3989,10 +4003,11 @@ export default function App() {
 
   useEffect(() => {
     setAIStatus((prev) => ({
-      primary: syncProviderStatus(prev.primary, !!state.groqKey),
-      fallback: syncProviderStatus(prev.fallback, !!state.cerebrasKey),
+      groq: syncProviderStatus(prev.groq, !!state.groqKey),
+      openrouter: syncProviderStatus(prev.openrouter, !!state.openrouterKey),
+      cerebras: syncProviderStatus(prev.cerebras, !!state.cerebrasKey),
     }));
-  }, [state.groqKey, state.cerebrasKey]);
+  }, [state.groqKey, state.openrouterKey, state.cerebrasKey]);
 
   useEffect(() => {
     const handleStorage = (event) => {
@@ -4331,11 +4346,15 @@ export default function App() {
 
   const runProviderTest = useCallback(async () => {
     const groq = document.getElementById("groq-key")?.value.trim() || "";
+    const openrouter = document.getElementById("openrouter-key")?.value.trim() || "";
+    const openrouterModel = resolveOpenRouterModelId(
+      document.getElementById("openrouter-model")?.value.trim(),
+    );
     const cerebras = document.getElementById("cerebras-key")?.value.trim() || "";
-    if (!groq && !cerebras) {
+    if (!groq && !openrouter && !cerebras) {
       setProviderTestState({
         loading: false,
-        msg: "Add a Groq or Cerebras API key before testing.",
+        msg: "Add a Groq, OpenRouter, or Cerebras API key before testing.",
         err: true,
       });
       return;
@@ -4349,21 +4368,28 @@ export default function App() {
 
     try {
       const results = await testProviders(
-        { groqKey: groq, cerebrasKey: cerebras },
+        {
+          groqKey: groq,
+          openrouterKey: openrouter,
+          openrouterModel,
+          cerebrasKey: cerebras,
+        },
         (_, __, providers) => {
           if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
         },
       );
 
-      const parts = [
-        results.primary?.ok
-          ? "Groq 70B OK"
-          : `Groq 70B failed: ${results.primary?.error || "Unknown error"}`,
-        results.fallback?.ok
-          ? "Cerebras Llama 3.1 8B OK"
-          : `Cerebras Llama 3.1 8B failed: ${results.fallback?.error || "Unknown error"}`,
-      ];
-      const hasError = [results.primary, results.fallback].some((r) => r && !r.ok);
+      const parts = AI_PROVIDER_ORDER.map((providerId) => {
+        const meta = AI_PROVIDER_META[providerId];
+        const result = results[providerId];
+        if (!result?.configured) return `${meta.chipLabel} not configured`;
+        if (result.ok) return `${meta.chipLabel} OK`;
+        return `${meta.chipLabel} failed: ${result?.error || "Unknown error"}`;
+      });
+      const hasError = AI_PROVIDER_ORDER.some((providerId) => {
+        const result = results[providerId];
+        return result?.configured && !result?.ok;
+      });
       const msg = parts.join(" · ");
       setProviderTestState({ loading: false, msg, err: hasError });
       showToast(msg, hasError);
@@ -4382,7 +4408,7 @@ export default function App() {
       setSetupStatus("Paste the project setup response first");
       return;
     }
-    if (!state.groqKey && !state.cerebrasKey) {
+    if (!state.groqKey && !state.openrouterKey && !state.cerebrasKey) {
       setModal("api");
       return;
     }
@@ -4393,8 +4419,9 @@ export default function App() {
       let resolvedProvider = "none";
       const onSetupStatus = (provider, msg, providers) => {
         if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-        if (provider === "groq" || provider === "cerebras") {
+        if (provider === "groq" || provider === "openrouter" || provider === "cerebras") {
           resolvedProvider = provider;
+          persistLocal({ apiProvider: provider });
         }
         setSetupStatus(msg);
       };
@@ -4404,10 +4431,16 @@ export default function App() {
         parsed = await callAI(
           PROJECT_SETUP_SYSTEM_PROMPT,
           setupPaste,
-          { groqKey: state.groqKey, cerebrasKey: state.cerebrasKey },
+          {
+            groqKey: state.groqKey,
+            openrouterKey: state.openrouterKey,
+            openrouterModel: state.openrouterModel,
+            cerebrasKey: state.cerebrasKey,
+          },
           onSetupStatus,
           {
             groqMaxTokens: 2600,
+            openrouterMaxTokens: 2600,
             cerebrasMaxTokens: 3200,
           },
         );
@@ -4420,7 +4453,12 @@ export default function App() {
           parsed = await callAI(
             PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
             setupPaste,
-            { groqKey: "", cerebrasKey: state.cerebrasKey },
+            {
+              groqKey: "",
+              openrouterKey: "",
+              openrouterModel: state.openrouterModel,
+              cerebrasKey: state.cerebrasKey,
+            },
             onSetupStatus,
             {
               cerebrasMaxTokens: 2600,
@@ -4479,6 +4517,8 @@ export default function App() {
       const providerLabel =
         resolvedProvider === "groq"
           ? "Setup applied with Groq"
+          : resolvedProvider === "openrouter"
+            ? "Setup applied with OpenRouter"
           : resolvedProvider === "cerebras"
             ? "Setup applied with Cerebras"
             : "Project setup applied";
@@ -4488,11 +4528,12 @@ export default function App() {
       setSetupStatus(success);
       showToast(success);
     } catch (e) {
+      persistLocal({ apiProvider: "none" });
       setSetupStatus(`Error: ${e.message}`);
       showToast(e.message, true);
     }
     setSetupLoading(false);
-  }, [persist, projectProfile, setupPaste, showToast, state]);
+  }, [persist, persistLocal, projectProfile, setupPaste, showToast, state]);
 
   const applyParsed = useCallback(
     (parsed, source) => {
@@ -4639,7 +4680,7 @@ export default function App() {
         setStatus("Paste content above first");
         return;
       }
-      if (!state.groqKey && !state.cerebrasKey) {
+      if (!state.groqKey && !state.openrouterKey && !state.cerebrasKey) {
         setModal("api");
         return;
       }
@@ -4663,10 +4704,15 @@ export default function App() {
         const parsed = await callAI(
           ctx,
           text,
-          { groqKey: state.groqKey, cerebrasKey: state.cerebrasKey },
+          {
+            groqKey: state.groqKey,
+            openrouterKey: state.openrouterKey,
+            openrouterModel: state.openrouterModel,
+            cerebrasKey: state.cerebrasKey,
+          },
           (provider, msg, providers) => {
             if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-            if (provider === "groq" || provider === "cerebras") {
+            if (provider === "groq" || provider === "openrouter" || provider === "cerebras") {
               resolvedProvider = provider;
               persistLocal({ apiProvider: provider });
             }
@@ -4681,6 +4727,8 @@ export default function App() {
         const providerLabel =
           resolvedProvider === "groq"
             ? "Updated with Groq"
+            : resolvedProvider === "openrouter"
+              ? "Updated with OpenRouter"
             : resolvedProvider === "cerebras"
               ? "Updated with Cerebras"
               : "Dashboard updated";
@@ -4712,35 +4760,27 @@ export default function App() {
   };
 
   const apiLabel = () => {
-    if (aiStatus.primary?.state === "active") return "Powered by Groq";
-    if (aiStatus.fallback?.state === "active") return "Powered by Cerebras";
-    if (aiStatus.primary?.state === "working" || aiStatus.fallback?.state === "working") {
+    const activeProvider = AI_PROVIDER_ORDER.find((providerId) => aiStatus[providerId]?.state === "active");
+    if (activeProvider) return `Powered by ${AI_PROVIDER_META[activeProvider].label}`;
+    if (AI_PROVIDER_ORDER.some((providerId) => aiStatus[providerId]?.state === "working")) {
       return "Checking providers";
     }
-    if (
-      ["failed", "rate_limited", "no_key"].includes(aiStatus.primary?.state) &&
-      ["failed", "rate_limited", "no_key"].includes(aiStatus.fallback?.state)
-    ) {
+    if (AI_PROVIDER_ORDER.every((providerId) => ["failed", "rate_limited", "no_key"].includes(aiStatus[providerId]?.state))) {
       return "No provider responded";
     }
-    if (state.apiProvider === "groq") return "Powered by Groq";
-    if (state.apiProvider === "cerebras") return "Powered by Cerebras";
-    return state.groqKey || state.cerebrasKey ? "Keys saved" : "No API key";
+    if (AI_PROVIDER_META[state.apiProvider]) return `Powered by ${AI_PROVIDER_META[state.apiProvider].label}`;
+    return state.groqKey || state.openrouterKey || state.cerebrasKey ? "Keys saved" : "No API key";
   };
   const apiDot = () => {
-    if (aiStatus.primary?.state === "active") return "#f59e0b";
-    if (aiStatus.fallback?.state === "active") return "#4ade80";
-    if (aiStatus.primary?.state === "working" || aiStatus.fallback?.state === "working") {
+    const activeProvider = AI_PROVIDER_ORDER.find((providerId) => aiStatus[providerId]?.state === "active");
+    if (activeProvider) return AI_PROVIDER_META[activeProvider].dot;
+    if (AI_PROVIDER_ORDER.some((providerId) => aiStatus[providerId]?.state === "working")) {
       return "#fdba74";
     }
-    if (
-      ["failed", "rate_limited", "no_key"].includes(aiStatus.primary?.state) &&
-      ["failed", "rate_limited", "no_key"].includes(aiStatus.fallback?.state)
-    ) {
+    if (AI_PROVIDER_ORDER.every((providerId) => ["failed", "rate_limited", "no_key"].includes(aiStatus[providerId]?.state))) {
       return "#f87171";
     }
-    if (state.apiProvider === "groq") return "#f59e0b";
-    if (state.apiProvider === "cerebras") return "#4ade80";
+    if (AI_PROVIDER_META[state.apiProvider]) return AI_PROVIDER_META[state.apiProvider].dot;
     return C.text2;
   };
 
@@ -5222,8 +5262,9 @@ export default function App() {
                     />
                     {apiLabel()}
                   </div>
-                  <ProviderStatusChip name="Groq 70B" info={aiStatus.primary} />
-                  <ProviderStatusChip name="Cerebras Llama 3.1 8B" info={aiStatus.fallback} />
+                  <ProviderStatusChip name={GROQ_PROVIDER.chipLabel} info={aiStatus.groq} />
+                  <ProviderStatusChip name={OPENROUTER_PROVIDER.chipLabel} info={aiStatus.openrouter} />
+                  <ProviderStatusChip name={CEREBRAS_PROVIDER.chipLabel} info={aiStatus.cerebras} />
                 </div>
               </>
             )}
@@ -5414,10 +5455,26 @@ export default function App() {
               "password",
             ],
             [
+              "openrouter-key",
+              "OpenRouter (Gemma 4 default)",
+              "sk-or-...",
+              "Optional middle fallback. Defaults to Gemma 4 on OpenRouter, and you can change the model below. Get a key from openrouter.ai/keys.",
+              state.openrouterKey || "",
+              "password",
+            ],
+            [
+              "openrouter-model",
+              "OpenRouter model ID",
+              OPENROUTER_PROVIDER.defaultModelId,
+              "Default is Gemma 4. Change this if you want another OpenRouter-compatible chat model.",
+              state.openrouterModel || OPENROUTER_PROVIDER.defaultModelId,
+              "text",
+            ],
+            [
               "cerebras-key",
               "Cerebras (free hobbyist fallback)",
               "csk_...",
-              "Fallback provider. Uses llama3.1-8b on Cerebras free tier. Get a free key from cloud.cerebras.ai.",
+              "Final fallback provider. Uses llama3.1-8b on Cerebras free tier. Get a free key from cloud.cerebras.ai.",
               state.cerebrasKey || "",
               "password",
             ],
@@ -5497,18 +5554,23 @@ export default function App() {
               }}
               onClick={() => {
                 const gr = document.getElementById("groq-key").value.trim();
+                const or = document.getElementById("openrouter-key").value.trim();
+                const orm = resolveOpenRouterModelId(document.getElementById("openrouter-model").value.trim());
                 const ce = document.getElementById("cerebras-key").value.trim();
                 const jira = document.getElementById("jira-base").value.trim().replace(/\/$/, "");
                 setProviderTestState({ loading: false, msg: "", err: false });
                 setAIStatus({
-                  primary: syncProviderStatus(null, !!gr),
-                  fallback: syncProviderStatus(null, !!ce),
+                  groq: syncProviderStatus(null, !!gr),
+                  openrouter: syncProviderStatus(null, !!or),
+                  cerebras: syncProviderStatus(null, !!ce),
                 });
                 persistLocal({
                   groqKey: gr,
+                  openrouterKey: or,
+                  openrouterModel: orm,
                   cerebrasKey: ce,
                   jiraBase: jira,
-                  apiProvider: gr ? "groq" : ce ? "cerebras" : "none",
+                  apiProvider: gr ? "groq" : or ? "openrouter" : ce ? "cerebras" : "none",
                 });
                 setModal(null);
                 setRovoSt("Keys saved — ready");

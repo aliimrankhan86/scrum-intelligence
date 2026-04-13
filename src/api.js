@@ -1,120 +1,224 @@
-// ─── AI Providers: Groq primary + Cerebras free fallback ─────────────────────
+// ─── AI Providers: Groq primary + OpenRouter + Cerebras fallback ─────────────
 
-const PRIMARY_GROQ_MODEL = {
-  id: 'llama-3.3-70b-versatile',
-  label: 'Groq 70B',
-};
+import {
+  CEREBRAS_PROVIDER,
+  GROQ_PROVIDER,
+  OPENROUTER_PROVIDER,
+  resolveOpenRouterModelId,
+} from './aiProviders';
 
-const CEREBRAS_FALLBACK_MODEL = {
-  id: 'llama3.1-8b',
-  label: 'Cerebras Llama 3.1 8B',
-};
-
+const OPENROUTER_MAX_TOKENS = 2200;
 const CEREBRAS_MAX_TOKENS = 2200;
 
+function noKeyStatus(label) {
+  return { state: 'no_key', detail: `No ${label} key saved` };
+}
+
+function buildProviderStates(keys) {
+  const openrouterModel = resolveOpenRouterModelId(keys?.openrouterModel);
+  return {
+    groq: keys?.groqKey
+      ? { state: 'ready', detail: 'Primary Groq model ready to use' }
+      : noKeyStatus(GROQ_PROVIDER.label),
+    openrouter: keys?.openrouterKey
+      ? { state: 'ready', detail: `OpenRouter ready with ${openrouterModel}` }
+      : noKeyStatus(OPENROUTER_PROVIDER.label),
+    cerebras: keys?.cerebrasKey
+      ? { state: 'ready', detail: 'Cerebras fallback model ready to use' }
+      : noKeyStatus(CEREBRAS_PROVIDER.label),
+  };
+}
+
+function nextAvailableProviderLabel(keys, currentProvider) {
+  const checks = [
+    currentProvider === 'groq' && keys?.openrouterKey ? OPENROUTER_PROVIDER.label : '',
+    currentProvider !== 'cerebras' && keys?.cerebrasKey ? CEREBRAS_PROVIDER.label : '',
+  ].filter(Boolean);
+  return checks[0] || '';
+}
+
 export async function callAI(systemPrompt, userContent, keys, onStatusChange, options = {}) {
-  const { groqKey, cerebrasKey } = keys;
+  const { groqKey, openrouterKey, openrouterModel, cerebrasKey } = keys;
+  const resolvedOpenRouterModel = resolveOpenRouterModelId(openrouterModel);
   const groqMaxTokens = Number.isFinite(Number(options?.groqMaxTokens))
     ? Number(options.groqMaxTokens)
     : 1500;
+  const openrouterMaxTokens = Number.isFinite(Number(options?.openrouterMaxTokens))
+    ? Number(options.openrouterMaxTokens)
+    : OPENROUTER_MAX_TOKENS;
   const cerebrasMaxTokens = Number.isFinite(Number(options?.cerebrasMaxTokens))
     ? Number(options.cerebrasMaxTokens)
     : CEREBRAS_MAX_TOKENS;
   const emit = (provider, msg, providers) => onStatusChange?.(provider, msg, providers);
   const errors = [];
+  let providerStates = buildProviderStates(keys);
 
-  if (!groqKey && !cerebrasKey) {
+  const emitWithStates = (provider, msg, patch = {}) => {
+    providerStates = { ...providerStates, ...patch };
+    emit(provider, msg, providerStates);
+  };
+
+  if (!groqKey && !openrouterKey && !cerebrasKey) {
     throw new Error('No API keys configured — click ⚙ API keys');
   }
 
-  let primaryState = groqKey ? 'ready' : 'no_key';
-  let primaryDetail = groqKey ? 'Primary Groq model ready to use' : 'No Groq key saved';
-
   if (groqKey) {
     try {
-      emit('processing', `Contacting ${PRIMARY_GROQ_MODEL.label}...`, {
-        primary: { state: 'working', detail: `Sending request to ${PRIMARY_GROQ_MODEL.id}` },
-        fallback: cerebrasKey
-          ? { state: 'standby', detail: `Waiting in case ${PRIMARY_GROQ_MODEL.label} fails` }
-          : { state: 'no_key', detail: 'No Cerebras key saved' },
+      emitWithStates('processing', `Contacting ${GROQ_PROVIDER.chipLabel}...`, {
+        groq: { state: 'working', detail: `Sending request to ${GROQ_PROVIDER.modelId}` },
+        openrouter: openrouterKey
+          ? { state: 'standby', detail: `Waiting in case ${GROQ_PROVIDER.chipLabel} fails` }
+          : noKeyStatus(OPENROUTER_PROVIDER.label),
+        cerebras: cerebrasKey
+          ? { state: 'standby', detail: 'Waiting for earlier providers in the fallback chain' }
+          : noKeyStatus(CEREBRAS_PROVIDER.label),
       });
 
       const raw = await requestGroqChat({
         groqKey,
-        model: PRIMARY_GROQ_MODEL.id,
+        model: GROQ_PROVIDER.modelId,
         systemPrompt,
         userContent,
         maxTokens: groqMaxTokens,
       });
-      if (!raw) throw new Error(`${PRIMARY_GROQ_MODEL.id} returned empty response`);
+      if (!raw) throw new Error(`${GROQ_PROVIDER.modelId} returned empty response`);
       const parsed = parseJSON(raw);
-      emit('groq', `Powered by ${PRIMARY_GROQ_MODEL.label}`, {
-        primary: { state: 'active', detail: `Response received from ${PRIMARY_GROQ_MODEL.label}` },
-        fallback: cerebrasKey
+      emitWithStates('groq', `Powered by ${GROQ_PROVIDER.label}`, {
+        groq: { state: 'active', detail: `Response received from ${GROQ_PROVIDER.chipLabel}` },
+        openrouter: openrouterKey
           ? { state: 'standby', detail: 'Fallback provider was not needed' }
-          : { state: 'no_key', detail: 'No Cerebras key saved' },
+          : noKeyStatus(OPENROUTER_PROVIDER.label),
+        cerebras: cerebrasKey
+          ? { state: 'standby', detail: 'Fallback provider was not needed' }
+          : noKeyStatus(CEREBRAS_PROVIDER.label),
       });
       return parsed;
     } catch (e) {
-      primaryState = e.status === 429 ? 'rate_limited' : 'failed';
-      primaryDetail = e.message;
-      errors.push(`${PRIMARY_GROQ_MODEL.label} unavailable: ${e.message}`);
-      if (cerebrasKey) {
-        emit(
+      const nextLabel = nextAvailableProviderLabel(keys, 'groq');
+      errors.push(`${GROQ_PROVIDER.chipLabel} unavailable: ${e.message}`);
+      if (nextLabel) {
+        emitWithStates(
           'fallback',
-          primaryState === 'rate_limited'
-            ? `${PRIMARY_GROQ_MODEL.label} rate limited — trying ${CEREBRAS_FALLBACK_MODEL.label}...`
-            : `${PRIMARY_GROQ_MODEL.label} failed — trying ${CEREBRAS_FALLBACK_MODEL.label}...`,
+          e.status === 429
+            ? `${GROQ_PROVIDER.chipLabel} rate limited — trying ${nextLabel}...`
+            : `${GROQ_PROVIDER.chipLabel} failed — trying ${nextLabel}...`,
           {
-            primary: { state: primaryState, detail: primaryDetail },
-            fallback: { state: 'working', detail: `Sending request to ${CEREBRAS_FALLBACK_MODEL.id}` },
+            groq: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+            openrouter: openrouterKey
+              ? {
+                  state: 'working',
+                  detail: `Sending request to ${resolvedOpenRouterModel}`,
+                }
+              : providerStates.openrouter,
+            cerebras: !openrouterKey && cerebrasKey
+              ? { state: 'working', detail: `Sending request to ${CEREBRAS_PROVIDER.modelId}` }
+              : providerStates.cerebras,
           },
         );
+      } else {
+        providerStates = {
+          ...providerStates,
+          groq: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+        };
       }
     }
   }
 
-  try {
-    if (!cerebrasKey) {
-      emit('error', `${CEREBRAS_FALLBACK_MODEL.label} not configured`, {
-        primary: { state: primaryState, detail: primaryDetail },
-        fallback: { state: 'no_key', detail: 'No Cerebras key saved' },
-      });
-      throw new Error(errors.join(' | ') || 'No Cerebras key saved');
-    }
+  if (openrouterKey) {
+    try {
+      if (!groqKey) {
+        emitWithStates('processing', `Contacting ${OPENROUTER_PROVIDER.label}...`, {
+          groq: noKeyStatus(GROQ_PROVIDER.label),
+          openrouter: { state: 'working', detail: `Sending request to ${resolvedOpenRouterModel}` },
+          cerebras: cerebrasKey
+            ? { state: 'standby', detail: 'Waiting in case OpenRouter fails' }
+            : noKeyStatus(CEREBRAS_PROVIDER.label),
+        });
+      }
 
-    if (!groqKey) {
-      emit('processing', `Contacting ${CEREBRAS_FALLBACK_MODEL.label}...`, {
-        primary: { state: 'no_key', detail: 'No Groq key saved' },
-        fallback: { state: 'working', detail: `Sending request to ${CEREBRAS_FALLBACK_MODEL.id}` },
+      const raw = await requestOpenRouterChat({
+        openrouterKey,
+        model: resolvedOpenRouterModel,
+        systemPrompt,
+        userContent,
+        maxTokens: openrouterMaxTokens,
+      });
+      if (!raw) throw new Error(`${resolvedOpenRouterModel} returned empty response`);
+      const parsed = parseJSON(raw);
+      emitWithStates(
+        'openrouter',
+        groqKey
+          ? `${GROQ_PROVIDER.label} unavailable — using ${OPENROUTER_PROVIDER.label}`
+          : `Powered by ${OPENROUTER_PROVIDER.label}`,
+        {
+          openrouter: { state: 'active', detail: `Response received from ${resolvedOpenRouterModel}` },
+          cerebras: cerebrasKey
+            ? { state: 'standby', detail: 'Fallback provider was not needed' }
+            : noKeyStatus(CEREBRAS_PROVIDER.label),
+        },
+      );
+      return parsed;
+    } catch (e) {
+      errors.push(`${OPENROUTER_PROVIDER.label} unavailable: ${e.message}`);
+      if (cerebrasKey) {
+        emitWithStates(
+          'fallback',
+          e.status === 429
+            ? `${OPENROUTER_PROVIDER.label} rate limited — trying ${CEREBRAS_PROVIDER.label}...`
+            : `${OPENROUTER_PROVIDER.label} failed — trying ${CEREBRAS_PROVIDER.label}...`,
+          {
+            openrouter: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+            cerebras: { state: 'working', detail: `Sending request to ${CEREBRAS_PROVIDER.modelId}` },
+          },
+        );
+      } else {
+        providerStates = {
+          ...providerStates,
+          openrouter: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+        };
+      }
+    }
+  }
+
+  if (!cerebrasKey) {
+    emitWithStates('error', `${CEREBRAS_PROVIDER.label} not configured`, {
+      cerebras: noKeyStatus(CEREBRAS_PROVIDER.label),
+    });
+    throw new Error(errors.join(' | ') || 'No Cerebras key saved');
+  }
+
+  try {
+    if (!groqKey && !openrouterKey) {
+      emitWithStates('processing', `Contacting ${CEREBRAS_PROVIDER.chipLabel}...`, {
+        groq: noKeyStatus(GROQ_PROVIDER.label),
+        openrouter: noKeyStatus(OPENROUTER_PROVIDER.label),
+        cerebras: { state: 'working', detail: `Sending request to ${CEREBRAS_PROVIDER.modelId}` },
       });
     }
 
     const raw = await requestCerebrasChat({
       cerebrasKey,
-      model: CEREBRAS_FALLBACK_MODEL.id,
+      model: CEREBRAS_PROVIDER.modelId,
       systemPrompt,
       userContent,
       maxTokens: cerebrasMaxTokens,
     });
-    if (!raw) throw new Error(`${CEREBRAS_FALLBACK_MODEL.id} returned empty response`);
+    if (!raw) throw new Error(`${CEREBRAS_PROVIDER.modelId} returned empty response`);
     const parsed = parseJSON(raw);
-    emit(
+    emitWithStates(
       'cerebras',
-      groqKey
-        ? `${PRIMARY_GROQ_MODEL.label} unavailable — using ${CEREBRAS_FALLBACK_MODEL.label}`
-        : `Powered by ${CEREBRAS_FALLBACK_MODEL.label}`,
+      groqKey || openrouterKey
+        ? 'Earlier providers unavailable — using Cerebras'
+        : `Powered by ${CEREBRAS_PROVIDER.label}`,
       {
-        primary: { state: primaryState, detail: primaryDetail },
-        fallback: { state: 'active', detail: `Response received from ${CEREBRAS_FALLBACK_MODEL.label}` },
+        cerebras: { state: 'active', detail: `Response received from ${CEREBRAS_PROVIDER.chipLabel}` },
       },
     );
     return parsed;
   } catch (e) {
-    errors.push(`${CEREBRAS_FALLBACK_MODEL.label} unavailable: ${e.message}`);
-    emit('error', 'No provider responded', {
-      primary: { state: primaryState, detail: primaryDetail },
-      fallback: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+    errors.push(`${CEREBRAS_PROVIDER.chipLabel} unavailable: ${e.message}`);
+    emitWithStates('error', 'No provider responded', {
+      cerebras: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
     });
   }
 
@@ -122,119 +226,115 @@ export async function callAI(systemPrompt, userContent, keys, onStatusChange, op
 }
 
 export async function testProviders(keys, onStatusChange) {
-  const { groqKey, cerebrasKey } = keys;
+  const { groqKey, openrouterKey, openrouterModel, cerebrasKey } = keys;
+  const resolvedOpenRouterModel = resolveOpenRouterModelId(openrouterModel);
   const emit = (provider, msg, providers) => onStatusChange?.(provider, msg, providers);
+  let providerStates = buildProviderStates(keys);
+  const emitWithStates = (provider, msg, patch = {}) => {
+    providerStates = { ...providerStates, ...patch };
+    emit(provider, msg, providerStates);
+  };
   const results = {};
   const testSystem = 'Return only compact JSON.';
   const testUser = '{"ok":true}';
 
-  if (!groqKey && !cerebrasKey) {
+  if (!groqKey && !openrouterKey && !cerebrasKey) {
     return {
-      primary: { ok: false, error: 'No Groq key saved' },
-      fallback: { ok: false, error: 'No Cerebras key saved' },
+      groq: { ok: false, configured: false, error: 'No Groq key saved' },
+      openrouter: { ok: false, configured: false, error: 'No OpenRouter key saved' },
+      cerebras: { ok: false, configured: false, error: 'No Cerebras key saved' },
     };
   }
 
   if (!groqKey) {
-    results.primary = { ok: false, error: 'No Groq key saved' };
-    emit('groq', `${PRIMARY_GROQ_MODEL.label} not configured`, {
-      primary: { state: 'no_key', detail: 'No Groq key saved' },
-      fallback: cerebrasKey
-        ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_FALLBACK_MODEL.label}` }
-        : { state: 'no_key', detail: 'No Cerebras key saved' },
-    });
+    results.groq = { ok: false, configured: false, error: 'No Groq key saved' };
+    emitWithStates('groq', `${GROQ_PROVIDER.chipLabel} not configured`);
   } else {
     try {
-      emit('processing', `Testing ${PRIMARY_GROQ_MODEL.label}...`, {
-        primary: { state: 'working', detail: `Testing ${PRIMARY_GROQ_MODEL.id}` },
-        fallback: cerebrasKey
-          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_FALLBACK_MODEL.label}` }
-          : { state: 'no_key', detail: 'No Cerebras key saved' },
+      emitWithStates('processing', `Testing ${GROQ_PROVIDER.chipLabel}...`, {
+        groq: { state: 'working', detail: `Testing ${GROQ_PROVIDER.modelId}` },
+        openrouter: openrouterKey
+          ? { state: 'standby', detail: `Waiting to test ${OPENROUTER_PROVIDER.label}` }
+          : noKeyStatus(OPENROUTER_PROVIDER.label),
+        cerebras: cerebrasKey
+          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_PROVIDER.chipLabel}` }
+          : noKeyStatus(CEREBRAS_PROVIDER.label),
       });
       const raw = await requestGroqChat({
         groqKey,
-        model: PRIMARY_GROQ_MODEL.id,
+        model: GROQ_PROVIDER.modelId,
         systemPrompt: testSystem,
         userContent: testUser,
         maxTokens: 80,
       });
-      if (!raw) throw new Error(`${PRIMARY_GROQ_MODEL.id} returned empty response`);
-      results.primary = { ok: true };
-      emit('groq', `${PRIMARY_GROQ_MODEL.label} test passed`, {
-        primary: { state: 'active', detail: `${PRIMARY_GROQ_MODEL.label} test request succeeded` },
-        fallback: cerebrasKey
-          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_FALLBACK_MODEL.label}` }
-          : { state: 'no_key', detail: 'No Cerebras key saved' },
+      if (!raw) throw new Error(`${GROQ_PROVIDER.modelId} returned empty response`);
+      results.groq = { ok: true, configured: true };
+      emitWithStates('groq', `${GROQ_PROVIDER.chipLabel} test passed`, {
+        groq: { state: 'active', detail: `${GROQ_PROVIDER.chipLabel} test request succeeded` },
       });
     } catch (e) {
-      results.primary = { ok: false, error: e.message };
-      emit('groq', `${PRIMARY_GROQ_MODEL.label} test failed`, {
-        primary: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
-        fallback: cerebrasKey
-          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_FALLBACK_MODEL.label}` }
-          : { state: 'no_key', detail: 'No Cerebras key saved' },
+      results.groq = { ok: false, configured: true, error: e.message };
+      emitWithStates('groq', `${GROQ_PROVIDER.chipLabel} test failed`, {
+        groq: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+      });
+    }
+  }
+
+  if (!openrouterKey) {
+    results.openrouter = { ok: false, configured: false, error: 'No OpenRouter key saved' };
+    emitWithStates('openrouter', `${OPENROUTER_PROVIDER.label} not configured`);
+  } else {
+    try {
+      emitWithStates('processing', `Testing ${OPENROUTER_PROVIDER.label}...`, {
+        openrouter: { state: 'working', detail: `Testing ${resolvedOpenRouterModel}` },
+        cerebras: cerebrasKey
+          ? { state: 'standby', detail: `Waiting to test ${CEREBRAS_PROVIDER.chipLabel}` }
+          : noKeyStatus(CEREBRAS_PROVIDER.label),
+      });
+      const raw = await requestOpenRouterChat({
+        openrouterKey,
+        model: resolvedOpenRouterModel,
+        systemPrompt: testSystem,
+        userContent: testUser,
+        maxTokens: 80,
+      });
+      if (!raw) throw new Error(`${resolvedOpenRouterModel} returned empty response`);
+      results.openrouter = { ok: true, configured: true };
+      emitWithStates('openrouter', `${OPENROUTER_PROVIDER.label} test passed`, {
+        openrouter: { state: 'active', detail: `${OPENROUTER_PROVIDER.label} test request succeeded` },
+      });
+    } catch (e) {
+      results.openrouter = { ok: false, configured: true, error: e.message };
+      emitWithStates('openrouter', `${OPENROUTER_PROVIDER.label} test failed`, {
+        openrouter: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
       });
     }
   }
 
   if (!cerebrasKey) {
-    results.fallback = { ok: false, error: 'No Cerebras key saved' };
-    emit('cerebras', `${CEREBRAS_FALLBACK_MODEL.label} not configured`, {
-      primary: results.primary?.ok
-        ? { state: 'active', detail: `${PRIMARY_GROQ_MODEL.label} test request succeeded` }
-        : groqKey
-          ? {
-              state: results.primary?.error?.includes('429') ? 'rate_limited' : 'failed',
-              detail: results.primary?.error || `${PRIMARY_GROQ_MODEL.label} test failed`,
-            }
-          : { state: 'no_key', detail: 'No Groq key saved' },
-      fallback: { state: 'no_key', detail: 'No Cerebras key saved' },
-    });
+    results.cerebras = { ok: false, configured: false, error: 'No Cerebras key saved' };
+    emitWithStates('cerebras', `${CEREBRAS_PROVIDER.chipLabel} not configured`);
   } else {
     try {
-      emit('processing', `Testing ${CEREBRAS_FALLBACK_MODEL.label}...`, {
-        primary: results.primary?.ok
-          ? { state: 'active', detail: `${PRIMARY_GROQ_MODEL.label} test request succeeded` }
-          : groqKey
-            ? {
-                state: results.primary?.error?.includes('429') ? 'rate_limited' : 'failed',
-                detail: results.primary?.error || `${PRIMARY_GROQ_MODEL.label} test failed`,
-              }
-            : { state: 'no_key', detail: 'No Groq key saved' },
-        fallback: { state: 'working', detail: `Testing ${CEREBRAS_FALLBACK_MODEL.id}` },
+      emitWithStates('processing', `Testing ${CEREBRAS_PROVIDER.chipLabel}...`, {
+        cerebras: { state: 'working', detail: `Testing ${CEREBRAS_PROVIDER.modelId}` },
       });
       const raw = await requestCerebrasChat({
         cerebrasKey,
-        model: CEREBRAS_FALLBACK_MODEL.id,
+        model: CEREBRAS_PROVIDER.modelId,
         systemPrompt: testSystem,
         userContent: testUser,
         maxTokens: 80,
       });
-      if (!raw) throw new Error(`${CEREBRAS_FALLBACK_MODEL.id} returned empty response`);
-      results.fallback = { ok: true };
-      emit('cerebras', `${CEREBRAS_FALLBACK_MODEL.label} test passed`, {
-        primary: results.primary?.ok
-          ? { state: 'active', detail: `${PRIMARY_GROQ_MODEL.label} test request succeeded` }
-          : groqKey
-            ? {
-                state: results.primary?.error?.includes('429') ? 'rate_limited' : 'failed',
-                detail: results.primary?.error || `${PRIMARY_GROQ_MODEL.label} test failed`,
-              }
-            : { state: 'no_key', detail: 'No Groq key saved' },
-        fallback: { state: 'active', detail: `${CEREBRAS_FALLBACK_MODEL.label} test request succeeded` },
+      if (!raw) throw new Error(`${CEREBRAS_PROVIDER.modelId} returned empty response`);
+      results.cerebras = { ok: true, configured: true };
+      emitWithStates('cerebras', `${CEREBRAS_PROVIDER.chipLabel} test passed`, {
+        cerebras: { state: 'active', detail: `${CEREBRAS_PROVIDER.chipLabel} test request succeeded` },
       });
     } catch (e) {
-      results.fallback = { ok: false, error: e.message };
-      emit('cerebras', `${CEREBRAS_FALLBACK_MODEL.label} test failed`, {
-        primary: results.primary?.ok
-          ? { state: 'active', detail: `${PRIMARY_GROQ_MODEL.label} test request succeeded` }
-          : groqKey
-            ? {
-                state: results.primary?.error?.includes('429') ? 'rate_limited' : 'failed',
-                detail: results.primary?.error || `${PRIMARY_GROQ_MODEL.label} test failed`,
-              }
-            : { state: 'no_key', detail: 'No Groq key saved' },
-        fallback: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
+      results.cerebras = { ok: false, configured: true, error: e.message };
+      emitWithStates('cerebras', `${CEREBRAS_PROVIDER.chipLabel} test failed`, {
+        cerebras: { state: e.status === 429 ? 'rate_limited' : 'failed', detail: e.message },
       });
     }
   }
@@ -267,6 +367,55 @@ async function requestGroqChat({ groqKey, model, systemPrompt, userContent, maxT
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const requestError = new Error(`Groq ${res.status}: ${err?.error?.message || res.statusText}`);
+    requestError.status = res.status;
+    throw requestError;
+  }
+
+  const data = await res.json();
+  const finishReason = data.choices?.[0]?.finish_reason || data.finish_reason || '';
+  const content = data.choices?.[0]?.message?.content || '';
+  if (finishReason === 'length') {
+    const requestError = new Error('OpenRouter responded, but the JSON was truncated (finish_reason=length).');
+    requestError.status = 200;
+    throw requestError;
+  }
+  return content;
+}
+
+async function requestOpenRouterChat({ openrouterKey, model, systemPrompt, userContent, maxTokens }) {
+  let res;
+  try {
+    res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openrouterKey}`,
+        'X-Title': 'Scrum Intelligence',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        temperature: 0.1,
+        max_tokens: maxTokens,
+      }),
+    });
+  } catch (e) {
+    const requestError = new Error('OpenRouter request did not reach the API. Check browser CORS, network access, or the saved key.');
+    requestError.status = 0;
+    throw requestError;
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail =
+      err?.error?.message ||
+      err?.message ||
+      (Array.isArray(err?.errors) ? err.errors.join(', ') : '') ||
+      res.statusText;
+    const requestError = new Error(`OpenRouter ${res.status}: ${detail}`);
     requestError.status = res.status;
     throw requestError;
   }

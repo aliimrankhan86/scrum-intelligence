@@ -27,6 +27,7 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.queryByText(/What this product does and how to use it/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
   expect(screen.getByText(/^Groq 70B$/i)).toBeInTheDocument();
+  expect(screen.getByText(/^OpenRouter$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Cerebras Llama 3.1 8B$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Shared sync$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Local only$/i)).toBeInTheDocument();
@@ -1077,6 +1078,8 @@ test('clear data preserves saved api key and jira base', async () => {
         epicName: 'UK Prospect Data Cleansing Automation',
       },
       groqKey: 'gsk_test_key',
+      openrouterKey: 'sk-or_test_key',
+      openrouterModel: 'google/gemma-4-31b-it:free',
       cerebrasKey: 'csk_test_key',
       jiraBase: 'https://example.atlassian.net/browse',
       apiProvider: 'groq',
@@ -1092,6 +1095,8 @@ test('clear data preserves saved api key and jira base', async () => {
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
   expect(saved.groqKey).toBe('gsk_test_key');
+  expect(saved.openrouterKey).toBe('sk-or_test_key');
+  expect(saved.openrouterModel).toBe('google/gemma-4-31b-it:free');
   expect(saved.cerebrasKey).toBe('csk_test_key');
   expect(saved.jiraBase).toBe('https://example.atlassian.net/browse');
   expect(saved.meetingData).toEqual({});
@@ -1373,6 +1378,8 @@ test('applying project setup can switch the dashboard to a new project profile',
     },
     sprintSummaries: { 4: { label: 'Old sprint' } },
     groqKey: 'gsk_test',
+    openrouterKey: 'sk-or_test',
+    openrouterModel: 'google/gemma-4-31b-it:free',
     cerebrasKey: 'csk_test',
     theme: 'light',
   };
@@ -1460,6 +1467,8 @@ test('applying project setup can switch the dashboard to a new project profile',
   expect(next.meetingData['7_standup'].actions[0].focus).toBe('Chase the admissions API token');
   expect(next.sprintSummaries).toEqual({});
   expect(next.groqKey).toBe('gsk_test');
+  expect(next.openrouterKey).toBe('sk-or_test');
+  expect(next.openrouterModel).toBe('google/gemma-4-31b-it:free');
   expect(next.cerebrasKey).toBe('csk_test');
   expect(next.theme).toBe('light');
   expect(next.projectSetupAppliedAt).toBeTruthy();

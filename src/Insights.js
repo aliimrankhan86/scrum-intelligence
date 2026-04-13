@@ -196,17 +196,22 @@ export default function Insights({ state, persist, onAIStatusChange }) {
 
   const process = async () => {
     if (!paste.trim()) { setStatus('Paste Rovo response above first'); return; }
-    if (!state.groqKey && !state.cerebrasKey) { setStatus('No API key — click API keys'); return; }
+    if (!state.groqKey && !state.openrouterKey && !state.cerebrasKey) { setStatus('No API key — click API keys'); return; }
     setLoading(true);
     setStatus('Processing...');
     try {
       let resolvedProvider = 'none';
       const parsed = await callAI(
         INSIGHTS_CONFIG.systemPrompt, paste,
-        { groqKey: state.groqKey, cerebrasKey: state.cerebrasKey },
+        {
+          groqKey: state.groqKey,
+          openrouterKey: state.openrouterKey,
+          openrouterModel: state.openrouterModel,
+          cerebrasKey: state.cerebrasKey,
+        },
         (provider, msg, providers) => {
           onAIStatusChange?.(providers);
-          if (provider === 'groq' || provider === 'cerebras') {
+          if (provider === 'groq' || provider === 'openrouter' || provider === 'cerebras') {
             resolvedProvider = provider;
           }
           setStatus(msg);
@@ -235,6 +240,8 @@ export default function Insights({ state, persist, onAIStatusChange }) {
       const providerLabel =
         resolvedProvider === 'groq'
           ? 'Updated with Groq'
+          : resolvedProvider === 'openrouter'
+            ? 'Updated with OpenRouter'
           : resolvedProvider === 'cerebras'
             ? 'Updated with Cerebras'
             : 'Velocity updated';
