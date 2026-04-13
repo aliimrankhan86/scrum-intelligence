@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App, { meetingMergePolicy } from './App';
 import { DEFAULT_SPRINTS, MEETINGS } from './config';
@@ -45,6 +45,95 @@ test('project setup is a dedicated page with instructions and the setup prompt',
   expect(screen.getByText(/Project setup prompt/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Copy setup prompt$/i })).toBeInTheDocument();
   expect(screen.getByPlaceholderText(/Paste the project setup response here/i)).toBeInTheDocument();
+});
+
+test('project setup applies valid setup JSON directly without requiring an API key', async () => {
+  const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+  render(<App />);
+
+  await userEvent.click(screen.getByRole('button', { name: /^Project setup$/i }));
+
+  const payload = {
+    projectProfile: {
+      dashboardTitle: 'Scrum Intelligence',
+      projectLabel: 'RPAB',
+      projectKey: 'RPAB',
+      projectName: 'RPA Build',
+      primaryEpic: 'RPAB-27',
+      primaryEpicName: 'UK Prospect Data Cleansing Automation',
+      goal: 'Get Prospect Dataset UAT completed and ready for CAB.',
+      sprintNameTemplate: '{projectKey} Sprint {num}',
+      sprintDurationDays: 14,
+      sprintGapDays: 1,
+      workstreams: [
+        { epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation', focus: 'Complete UAT and CAB readiness.' },
+      ],
+      team: [
+        { name: 'Nick Baumer', role: null },
+      ],
+      stakeholders: [],
+      watchTickets: ['RPAB-98'],
+      knownRisks: ['Jira interaction approach not yet confirmed.'],
+      knownDecisions: ['No dispatcher is required for this process.'],
+    },
+    projectContext: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-27',
+      epicName: 'UK Prospect Data Cleansing Automation',
+    },
+    sprints: [
+      { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true },
+      { num: 5, name: 'RPAB Sprint 5', start: '2026-04-15', end: '2026-04-28', active: false },
+    ],
+    activeSprint: 4,
+    recentSprintHistory: [],
+    activeSprintBoard: {
+      summary: 'Sprint 4 is focused on UAT completion.',
+      sprintGoal: 'Get Prospect Dataset UAT completed and ready for CAB.',
+      ragStatus: 'at risk',
+      ragReason: 'One impediment remains open.',
+      metrics: { done: 1, inprog: 1, inreview: 0, blocked: 1, todo: 0, backlog: 0, total: 3, health: 'at risk' },
+      epicsInPlay: [
+        { epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation', status: 'active', focus: 'UAT completion', deliveryNote: null },
+      ],
+      ticketsDone: [
+        { ticket: 'RPAB-96', summary: 'Performer State Machine', type: 'story', status: 'Done', assignee: 'Todd Slaughter', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+      ],
+      ticketsInProgress: [
+        { ticket: 'RPAB-57', summary: 'UAT test data provided by the business', type: 'story', status: 'In Progress', assignee: 'Marion Raji', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+      ],
+      ticketsInReview: [],
+      ticketsBlocked: [
+        { ticket: 'RPAB-98', summary: 'Understand how to interact with Jira', type: 'story', status: 'Blocked', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation', reason: 'Need API vs GUI decision.' },
+      ],
+      ticketsTodo: [],
+      blockers: [
+        { title: 'Jira interaction approach unresolved', detail: 'Need API vs GUI decision.', ticketId: 'RPAB-98', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+      ],
+      staleInProgress: [],
+      notPickedUp: [],
+      questions: [],
+      actions: [],
+      nextSteps: [],
+      decisions: [],
+      risks: [],
+      notes: [],
+    },
+    setupNotes: ['Applied from direct JSON.'],
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the project setup response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getByRole('button', { name: /^Apply setup$/i }));
+
+  await waitFor(() => {
+    const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
+    expect(saved.projectProfile.projectKey).toBe('RPAB');
+    expect(saved.projectProfile.projectName).toBe('RPA Build');
+    expect(saved.activeSprint).toBe(4);
+  });
+  confirmSpy.mockRestore();
 });
 
 test('reflects the latest saved dashboard data from another browser instance', async () => {

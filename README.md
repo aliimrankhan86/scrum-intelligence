@@ -44,6 +44,8 @@ Meeting-note input is flexible by design. It works with Hedy, Apple Notes, Teams
 6. Add your own keys in `API keys`.
 7. Open `Daily standup` and use the Rovo prompt plus meeting notes input to keep the dashboard current.
 
+If the pasted setup response is already valid JSON in the expected schema, the app applies it directly without sending it through an LLM again. The AI parsing fallback is used only when the pasted setup response needs cleanup or conversion.
+
 Supported AI provider order:
 - Groq first
 - OpenRouter second, defaulting to `google/gemma-4-31b-it:free`

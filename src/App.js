@@ -36,6 +36,7 @@ import {
   normaliseProjectProfile,
   PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
   PROJECT_SETUP_SYSTEM_PROMPT,
+  tryParseProjectSetupPayload,
 } from "./projectProfile";
 import {
   buildSharedStateSnapshot,
@@ -4408,15 +4409,16 @@ export default function App() {
       setSetupStatus("Paste the project setup response first");
       return;
     }
-    if (!state.groqKey && !state.openrouterKey && !state.cerebrasKey) {
+    const directJsonSetup = tryParseProjectSetupPayload(setupPaste);
+    if (!directJsonSetup && !state.groqKey && !state.openrouterKey && !state.cerebrasKey) {
       setModal("api");
       return;
     }
 
     setSetupLoading(true);
-    setSetupStatus("Processing project setup...");
+    setSetupStatus(directJsonSetup ? "Valid setup JSON detected. Applying directly..." : "Processing project setup...");
     try {
-      let resolvedProvider = "none";
+      let resolvedProvider = directJsonSetup ? "json" : "none";
       const onSetupStatus = (provider, msg, providers) => {
         if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
         if (provider === "groq" || provider === "openrouter" || provider === "cerebras") {
@@ -4427,46 +4429,50 @@ export default function App() {
       };
 
       let parsed;
-      try {
-        parsed = await callAI(
-          PROJECT_SETUP_SYSTEM_PROMPT,
-          setupPaste,
-          {
-            groqKey: state.groqKey,
-            openrouterKey: state.openrouterKey,
-            openrouterModel: state.openrouterModel,
-            cerebrasKey: state.cerebrasKey,
-          },
-          onSetupStatus,
-          {
-            groqMaxTokens: 2600,
-            openrouterMaxTokens: 2600,
-            cerebrasMaxTokens: 3200,
-          },
-        );
-      } catch (e) {
-        if (
-          state.cerebrasKey &&
-          /truncated|finish_reason=length|response was cut off/i.test(e.message || "")
-        ) {
-          setSetupStatus("Setup response was too large for the fallback model. Retrying with a compact parser...");
+      if (directJsonSetup) {
+        parsed = directJsonSetup;
+      } else {
+        try {
           parsed = await callAI(
-            PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
+            PROJECT_SETUP_SYSTEM_PROMPT,
             setupPaste,
             {
-              groqKey: "",
-              openrouterKey: "",
+              groqKey: state.groqKey,
+              openrouterKey: state.openrouterKey,
               openrouterModel: state.openrouterModel,
               cerebrasKey: state.cerebrasKey,
             },
             onSetupStatus,
             {
-              cerebrasMaxTokens: 2600,
+              groqMaxTokens: 2600,
+              openrouterMaxTokens: 2600,
+              cerebrasMaxTokens: 3200,
             },
           );
-          resolvedProvider = "cerebras";
-        } else {
-          throw e;
+        } catch (e) {
+          if (
+            state.cerebrasKey &&
+            /truncated|finish_reason=length|response was cut off/i.test(e.message || "")
+          ) {
+            setSetupStatus("Setup response was too large for the fallback model. Retrying with a compact parser...");
+            parsed = await callAI(
+              PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
+              setupPaste,
+              {
+                groqKey: "",
+                openrouterKey: "",
+                openrouterModel: state.openrouterModel,
+                cerebrasKey: state.cerebrasKey,
+              },
+              onSetupStatus,
+              {
+                cerebrasMaxTokens: 2600,
+              },
+            );
+            resolvedProvider = "cerebras";
+          } else {
+            throw e;
+          }
         }
       }
 
@@ -4515,7 +4521,9 @@ export default function App() {
           ? `Seeded ${setupTicketCount} sprint item${setupTicketCount === 1 ? "" : "s"}${setupEpicCount ? ` across ${setupEpicCount} epic${setupEpicCount === 1 ? "" : "s"}` : ""}`
           : "Project profile and sprint structure updated";
       const providerLabel =
-        resolvedProvider === "groq"
+        resolvedProvider === "json"
+          ? "Project setup applied from JSON"
+        : resolvedProvider === "groq"
           ? "Setup applied with Groq"
           : resolvedProvider === "openrouter"
             ? "Setup applied with OpenRouter"

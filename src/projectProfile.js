@@ -311,6 +311,52 @@ function hasRealProjectSeed(profile, sprintItems = [], sprintSummaries = {}) {
   return hasProjectIdentity || hasNonDefaultSprintSeed || Object.keys(sprintSummaries || {}).length > 0;
 }
 
+function parseLooseJsonObject(raw) {
+  const text = textValue(raw);
+  if (!text) return null;
+
+  const cleaned = text
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim();
+
+  const candidates = [cleaned];
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    candidates.push(cleaned.slice(start, end + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (_) {
+      // Try the next parse strategy.
+    }
+  }
+
+  return null;
+}
+
+export function isProjectSetupPayload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const hasProjectProfile = value.projectProfile && typeof value.projectProfile === 'object' && !Array.isArray(value.projectProfile);
+  const hasProjectContext = value.projectContext && typeof value.projectContext === 'object' && !Array.isArray(value.projectContext);
+  const hasSprints = Array.isArray(value.sprints);
+  const hasActiveSprintBoard = value.activeSprintBoard && typeof value.activeSprintBoard === 'object' && !Array.isArray(value.activeSprintBoard);
+  const hasSetupNotes = Array.isArray(value.setupNotes);
+
+  return hasProjectProfile || hasProjectContext || hasSprints || hasActiveSprintBoard || hasSetupNotes;
+}
+
+export function tryParseProjectSetupPayload(raw) {
+  const parsed = parseLooseJsonObject(raw);
+  return isProjectSetupPayload(parsed) ? parsed : null;
+}
+
 export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprints = [], sprintSummaries = {}) {
   const safe = normaliseProjectProfile(profile);
   const sprintItems = normaliseSprints(sprints, safe);
