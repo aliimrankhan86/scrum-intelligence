@@ -275,9 +275,46 @@ function sprintStageLabel(sprint, activeSprintNum) {
   return "planned";
 }
 
+function hasRealProjectSeed(profile, sprintItems = [], sprintSummaries = {}) {
+  const safe = normaliseProjectProfile(profile);
+  const hasProjectIdentity = Boolean(
+    safe.projectKey ||
+    safe.projectName ||
+    safe.primaryEpic ||
+    safe.primaryEpicName ||
+    safe.what ||
+    safe.goal ||
+    safe.phase ||
+    safe.workstreams.length ||
+    safe.team.length ||
+    safe.stakeholders.length ||
+    safe.watchTickets.length ||
+    safe.knownRisks.length ||
+    safe.knownDecisions.length,
+  );
+
+  const hasNonDefaultSprintSeed = sprintItems.some((sprint) => {
+    const matchingDefault =
+      sprint.num === 1
+        ? { name: "Sprint 1", start: "2026-01-05", end: "2026-01-18" }
+        : sprint.num === 2
+          ? { name: "Sprint 2", start: "2026-01-19", end: "2026-02-01" }
+          : null;
+    if (!matchingDefault) return true;
+    return (
+      sprint.name !== matchingDefault.name ||
+      sprint.start !== matchingDefault.start ||
+      sprint.end !== matchingDefault.end
+    );
+  });
+
+  return hasProjectIdentity || hasNonDefaultSprintSeed || Object.keys(sprintSummaries || {}).length > 0;
+}
+
 export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprints = [], sprintSummaries = {}) {
   const safe = normaliseProjectProfile(profile);
   const sprintItems = normaliseSprints(sprints, safe);
+  const hasSeedContext = hasRealProjectSeed(safe, sprintItems, sprintSummaries);
   const activeSprintNum =
     sprintItems.find((item) => item.active)?.num ||
     sprintItems[sprintItems.length - 1]?.num ||
@@ -379,6 +416,8 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     ``,
     `Rules:`,
     `- Use the current project and current active sprint, not historical defaults.`,
+    `- Determine the actual live current sprint from Jira / Rovo / project delivery evidence and return it as both the sprint with "active": true and the numeric "activeSprint" value.`,
+    `- If any dashboard seed context below conflicts with current Jira / Confluence / project evidence, trust the live project evidence and return the real current sprint.`,
     `- Prefer confirmed Jira / Confluence / project data over assumptions.`,
     `- Include recent sprint history as quantity data: prefer at least the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.`,
     `- If future sprint dates are not explicitly listed but cadence is clear from recent sprints or delivery notes, infer the next sprint dates from that cadence.`,
@@ -401,14 +440,19 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `Primary epic: ${primaryEpicLabel}`,
     `Scrum lead hint: ${scrumLeadLabel}`,
     `Sprint naming template hint: ${safe.sprintNameTemplate || "not configured"}`,
-    `Sprint cadence hint: ${durationDays || "unknown"} day sprint${gapDays != null ? ` | ${gapDays} gap day${gapDays === 1 ? "" : "s"}` : ""}`,
-    safe.workstreams.length
+    hasSeedContext
+      ? `Sprint cadence hint: ${durationDays || "unknown"} day sprint${gapDays != null ? ` | ${gapDays} gap day${gapDays === 1 ? "" : "s"}` : ""}`
+      : `Sprint cadence hint: no reliable dashboard sprint cadence is configured yet — infer the live cadence from Jira / Rovo / project delivery evidence.`,
+    !hasSeedContext
+      ? `Dashboard seed status: generic placeholder context only. Ignore placeholder sprint names or dates and determine the real current sprint directly from Jira / Rovo.`
+      : "",
+    safe.workstreams.length && hasSeedContext
       ? `Known workstreams in the dashboard:
 ${safe.workstreams.map((item) => `- ${item.epic || "unknown"} | ${item.epicName || "untitled"}${item.focus ? ` | ${item.focus}` : ""}`).join("\n")}`
       : "",
-    sprintLines ? `Current sprint list in the dashboard:
+    sprintLines && hasSeedContext ? `Current sprint list in the dashboard:
 ${sprintLines}` : "",
-    historyLines ? `Recent archived sprint context already in the dashboard:
+    historyLines && hasSeedContext ? `Recent archived sprint context already in the dashboard:
 ${historyLines}` : "",
   ].filter(Boolean).join("\n");
 }

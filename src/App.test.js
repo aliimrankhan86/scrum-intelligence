@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App, { meetingMergePolicy } from './App';
-import { MEETINGS } from './config';
+import { DEFAULT_SPRINTS, MEETINGS } from './config';
 import { buildRovoMasterPrompt } from './features/sprint-review/promptTemplates/rovoMasterPrompt';
 import { buildPptFormatPrompt } from './features/sprint-review/promptTemplates/pptFormatPrompt';
 import { buildProjectSetupPrompt } from './projectProfile';
@@ -1311,6 +1311,7 @@ test('project setup prompt is copyable and asks for a full adaptive project prof
   expect(prompt).toContain('Use current Jira / Confluence / project documentation / delivery notes');
   expect(prompt).toContain('Include the current active sprint team');
   expect(prompt).toContain('If team membership has changed, return the latest team only');
+  expect(prompt).toContain('Determine the actual live current sprint from Jira / Rovo / project delivery evidence');
   expect(prompt).toContain('Sprint cadence hint');
   expect(prompt).toContain('Current dashboard seed context');
   expect(prompt).toContain('Known workstreams in the dashboard');
@@ -1321,12 +1322,16 @@ test('project setup prompt is copyable and asks for a full adaptive project prof
 });
 
 test('default setup prompt stays generic before any project is configured', () => {
-  const prompt = buildProjectSetupPrompt({}, []);
+  const prompt = buildProjectSetupPrompt({}, DEFAULT_SPRINTS);
 
   expect(prompt).toContain('Project key: not configured');
   expect(prompt).toContain('Project name: not configured');
   expect(prompt).toContain('Primary epic: not configured');
   expect(prompt).toContain('This setup must let the dashboard adapt to any project');
+  expect(prompt).toContain('Dashboard seed status: generic placeholder context only');
+  expect(prompt).toContain('determine the real current sprint directly from Jira / Rovo');
+  expect(prompt).not.toContain('Current sprint list in the dashboard');
+  expect(prompt).not.toContain('- 1 | Sprint 1 | 2026-01-05 | 2026-01-18 | active');
   expect(prompt).not.toContain('RPAB');
   expect(prompt).not.toContain('UK Prospect Data Cleansing Automation');
 });
