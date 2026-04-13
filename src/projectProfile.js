@@ -457,94 +457,109 @@ ${historyLines}` : "",
   ].filter(Boolean).join("\n");
 }
 
-export const PROJECT_SETUP_SYSTEM_PROMPT = `You convert project setup notes, delivery notes, or a Rovo project setup response into clean JSON for a Scrum dashboard.
-Return ONLY valid JSON — no markdown, no commentary.
+export const PROJECT_SETUP_SYSTEM_PROMPT = `Convert project setup notes, delivery notes, or a Rovo setup response into valid JSON for a Scrum dashboard.
+Return ONLY JSON. No markdown. No commentary. Keep the JSON compact and high-signal.
 
 Schema:
 {
   "projectProfile": {
-    "dashboardTitle": "optional legacy field, use Scrum Intelligence or null",
-    "projectLabel": "short footer label or null",
-    "projectKey": "jira project key or null",
-    "projectName": "project / initiative name or null",
-    "primaryEpic": "primary epic key or null",
-    "primaryEpicName": "primary epic title or null",
-    "goal": "current project / sprint goal or null",
-    "phase": "delivery phase or null",
-    "what": "short explanation of what the project does or null",
-    "scrumMasterName": "name or null",
-    "scrumMasterRole": "role or null",
-    "sprintNameTemplate": "template like {projectKey} Sprint {num} or null",
+    "dashboardTitle": "string|null",
+    "projectLabel": "string|null",
+    "projectKey": "string|null",
+    "projectName": "string|null",
+    "primaryEpic": "string|null",
+    "primaryEpicName": "string|null",
+    "goal": "string|null",
+    "phase": "string|null",
+    "what": "string|null",
+    "scrumMasterName": "string|null",
+    "scrumMasterRole": "string|null",
+    "sprintNameTemplate": "string|null",
     "sprintDurationDays": 14,
-    "sprintGapDays": 1,
-    "reviewDeckReference": "locked review deck reference or null",
-    "reviewDeckGuidance": "review deck handling guidance or null",
-    "workstreams": [{ "epic": "EPIC-1", "epicName": "title", "focus": "one-line focus or null" }],
-    "team": [{ "name": "person", "role": "role" }],
-    "stakeholders": [{ "name": "person", "role": "role" }],
+    "sprintGapDays": 0,
+    "reviewDeckReference": "string|null",
+    "reviewDeckGuidance": "string|null",
+    "workstreams": [{ "epic": "string|null", "epicName": "string|null", "focus": "string|null" }],
+    "team": [{ "name": "string", "role": "string|null" }],
+    "stakeholders": [{ "name": "string", "role": "string|null" }],
     "watchTickets": ["TICKET-123"],
-    "knownRisks": ["risk"],
-    "knownDecisions": ["decision"]
+    "knownRisks": ["string"],
+    "knownDecisions": ["string"]
   },
-  "projectContext": { "projectKey": "jira project key or null", "epic": "primary epic key or null", "epicName": "primary epic title or null" },
-  "sprints": [{ "num": 1, "name": "sprint name", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "active": true }],
+  "projectContext": { "projectKey": "string|null", "epic": "string|null", "epicName": "string|null" },
+  "sprints": [{ "num": 1, "name": "string", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "active": true }],
   "activeSprint": 1,
-  "recentSprintHistory": [
-    {
-      "num": 1,
-      "name": "sprint name",
-      "start": "YYYY-MM-DD",
-      "end": "YYYY-MM-DD",
-      "goal": "sprint goal or null",
-      "status": "completed | partial | slipped | cancelled | unknown | null",
-      "summary": "one-line sprint outcome",
-      "carryOver": ["ticket or carry-over theme"],
-      "completedHighlights": ["notable delivered item"],
-      "risks": ["key blocker, risk, or dependency"],
-      "metrics": { "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 }
-    }
-  ],
+  "recentSprintHistory": [{
+    "num": 1, "name": "string", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD",
+    "goal": "string|null", "status": "completed|partial|slipped|cancelled|unknown|null", "summary": "string|null",
+    "carryOver": ["string"], "completedHighlights": ["string"], "risks": ["string"],
+    "metrics": { "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 }
+  }],
   "activeSprintBoard": {
-    "summary": "one-line sprint summary or null",
-    "sprintGoal": "current sprint goal or null",
-    "ragStatus": "on track | at risk | off track | unknown | null",
-    "ragReason": "why the sprint is in that state or null",
-    "metrics": { "done": 0, "inprog": 0, "inreview": 0, "blocked": 0, "todo": 0, "backlog": 0, "total": 0, "health": "on track | at risk | off track | unknown | null" },
-    "epicsInPlay": [{ "epic": "EPIC-1", "epicName": "title", "status": "active | blocked | review | todo | done | null", "focus": "what this epic is driving now or null", "deliveryNote": "delivery context or null" }],
-    "ticketsDone": [{ "ticket": "TICKET-1", "summary": "title", "type": "epic | story | task | bug | spike | sub-task | null", "status": "Done", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],
-    "ticketsInProgress": [{ "ticket": "TICKET-2", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "In Progress", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],
-    "ticketsInReview": [{ "ticket": "TICKET-3", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "In Review", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],
-    "ticketsBlocked": [{ "ticket": "TICKET-4", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "Blocked", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title", "reason": "current blocker reason or null" }],
-    "ticketsTodo": [{ "ticket": "TICKET-5", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "To Do", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],
-    "blockers": [{ "title": "headline", "detail": "current blocker detail", "ticketId": "TICKET-4", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],
-    "staleInProgress": [{ "ticket": "TICKET-2", "summary": "title", "assignee": "name or unassigned", "days": 6, "epic": "EPIC-1", "epicName": "epic title" }],
-    "notPickedUp": [{ "ticket": "TICKET-5", "summary": "title", "assignee": "name or unassigned", "days": 7, "epic": "EPIC-1", "epicName": "epic title" }],
-    "questions": [{ "target": "person or group", "question": "question to ask", "why": "why this matters now", "needed": "what answer or decision is needed" }],
-    "actions": [{ "focus": "specific follow-up", "owner": "person or group", "why": "reason", "detail": "important detail or null", "urgency": "today | this week | this sprint | next sprint | null", "ticketId": "TICKET-4 or null" }],
-    "nextSteps": [{ "step": "next step", "owner": "person or group", "why": "reason", "detail": "important detail or null", "timing": "today | this week | next session | null" }],
-    "decisions": [{ "decision": "decision made", "owner": "person or group", "why": "reason", "detail": "important detail or null" }],
-    "risks": [{ "risk": "risk statement", "severity": "low | medium | high | null", "detail": "important detail or null", "owner": "person or group or null" }],
-    "notes": ["high-signal setup note"]
+    "summary": "string|null",
+    "sprintGoal": "string|null",
+    "ragStatus": "on track|at risk|off track|unknown|null",
+    "ragReason": "string|null",
+    "metrics": { "done": 0, "inprog": 0, "inreview": 0, "blocked": 0, "todo": 0, "backlog": 0, "total": 0, "health": "on track|at risk|off track|unknown|null" },
+    "epicsInPlay": [{ "epic": "string|null", "epicName": "string|null", "status": "active|blocked|review|todo|done|null", "focus": "string|null", "deliveryNote": "string|null" }],
+    "ticketsDone": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "Done", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
+    "ticketsInProgress": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "In Progress", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
+    "ticketsInReview": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "In Review", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
+    "ticketsBlocked": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "Blocked", "assignee": "string|null", "epic": "string|null", "epicName": "string|null", "reason": "string|null" }],
+    "ticketsTodo": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "To Do", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
+    "blockers": [{ "title": "string", "detail": "string|null", "ticketId": "string|null", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
+    "staleInProgress": [{ "ticket": "string", "summary": "string", "assignee": "string|null", "days": 6, "epic": "string|null", "epicName": "string|null" }],
+    "notPickedUp": [{ "ticket": "string", "summary": "string", "assignee": "string|null", "days": 7, "epic": "string|null", "epicName": "string|null" }],
+    "questions": [{ "target": "string", "question": "string", "why": "string|null", "needed": "string|null" }],
+    "actions": [{ "focus": "string", "owner": "string|null", "why": "string|null", "detail": "string|null", "urgency": "string|null", "ticketId": "string|null" }],
+    "nextSteps": [{ "step": "string", "owner": "string|null", "why": "string|null", "detail": "string|null", "timing": "string|null" }],
+    "decisions": [{ "decision": "string", "owner": "string|null", "why": "string|null", "detail": "string|null" }],
+    "risks": [{ "risk": "string", "severity": "low|medium|high|null", "detail": "string|null", "owner": "string|null" }],
+    "notes": ["string"]
   },
-  "setupNotes": ["short note"]
+  "setupNotes": ["string"]
 }
 
 Rules:
-- Use null or [] when information is not available.
-- Keep only current project information.
-- If sprint names are not given but sprint numbers are given, infer a clean sprint name from the project key when obvious.
-- If one sprint is marked active, set activeSprint to that sprint number.
-- If no sprint is marked active but activeSprint is clear from the notes, use it.
-- Prefer at least the last 2 completed sprints, the active sprint, and the next 2 planned sprints in "sprints" when that information is available.
-- If future sprint dates are not explicitly listed but cadence is clear from recent sprints or delivery notes, infer the next sprint dates from that cadence.
-- Team and stakeholder arrays should contain unique people only.
-- workstreams must cover all epics / workstreams currently in play.
-- Include sprint cadence when known: sprintDurationDays = inclusive sprint length, sprintGapDays = gap days between sprints.
-- recentSprintHistory should summarise previous sprint outcomes, carry-over, recurring blockers, and quantitative metrics when those are known.
-- Include the current active sprint team from the scrum board / assignees when known.
-- If team membership has changed, return the latest team list only.
-- watchTickets, knownRisks, knownDecisions, setupNotes, and notes must be concise and deduped.
-- Include the current active sprint board snapshot with all relevant epics, stories, tasks, bugs, spikes, and sub-tasks grouped by status.
-- If a ticket is both in progress and blocked right now, include it in both ticketsInProgress and ticketsBlocked and add the blocker detail.
+- Use null or [] when unknown.
+- Keep only current project data.
+- Infer a sprint name from the project key only when it is obvious.
+- Set the real active sprint in both "sprints[].active" and "activeSprint".
+- Prefer the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.
+- Infer future sprint dates only when cadence is clear from evidence.
+- team and stakeholders must be unique people.
+- workstreams must cover the epics currently in play.
+- Include active sprint board data grouped by status.
+- A ticket can be in both ticketsInProgress and ticketsBlocked only when it is truly in progress and currently blocked.
 - Only classify blocked when the current Jira state or current impediment / flagged signal supports it.
-- Do not invent dates, Jira keys, assignees, metrics, or sprint cadence.`;
+- Do not invent dates, Jira keys, assignees, metrics, or cadence.
+- Keep strings concise. Prefer short summaries over long prose.
+- Max counts: sprints 6, recentSprintHistory 4, workstreams/team/stakeholders/watchTickets/knownRisks/knownDecisions 8 each, epicsInPlay 8, ticket arrays 10 each, blockers/staleInProgress/notPickedUp/questions/actions/nextSteps/decisions/risks/notes/setupNotes 5 each.`;
+
+export const PROJECT_SETUP_COMPACT_SYSTEM_PROMPT = `Convert project setup notes or a Rovo setup response into the same JSON schema used by the Scrum dashboard.
+Return ONLY compact JSON. No markdown. No commentary.
+Use null or [] when unknown. Keep every string short.
+
+Required top-level keys:
+- projectProfile
+- projectContext
+- sprints
+- activeSprint
+- recentSprintHistory
+- activeSprintBoard
+- setupNotes
+
+Required projectProfile keys:
+dashboardTitle, projectLabel, projectKey, projectName, primaryEpic, primaryEpicName, goal, phase, what, scrumMasterName, scrumMasterRole, sprintNameTemplate, sprintDurationDays, sprintGapDays, reviewDeckReference, reviewDeckGuidance, workstreams, team, stakeholders, watchTickets, knownRisks, knownDecisions.
+
+Required activeSprintBoard keys:
+summary, sprintGoal, ragStatus, ragReason, metrics, epicsInPlay, ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo, blockers, staleInProgress, notPickedUp, questions, actions, nextSteps, decisions, risks, notes.
+
+Rules:
+- Set the real active sprint in both "sprints[].active" and "activeSprint".
+- Prefer last 2 completed sprints + active sprint + next 2 planned sprints when available.
+- Keep only current project information.
+- Keep output highly compressed and deduped.
+- Max counts: sprints 5, recentSprintHistory 3, workstreams/team/stakeholders/watchTickets/knownRisks/knownDecisions 6 each, epicsInPlay 6, ticket arrays 8 each, blockers/staleInProgress/notPickedUp/questions/actions/nextSteps/decisions/risks/notes/setupNotes 4 each.
+- Only classify blocked when current Jira evidence supports it.
+- Do not invent dates, Jira keys, assignees, metrics, or cadence.`;

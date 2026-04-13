@@ -27,6 +27,7 @@ import {
   deriveProjectContextFromProfile,
   generateFutureSprints,
   normaliseProjectProfile,
+  PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
   PROJECT_SETUP_SYSTEM_PROMPT,
 } from "./projectProfile";
 import {
@@ -4390,22 +4391,46 @@ export default function App() {
     setSetupStatus("Processing project setup...");
     try {
       let resolvedProvider = "none";
-      const parsed = await callAI(
-        PROJECT_SETUP_SYSTEM_PROMPT,
-        setupPaste,
-        { groqKey: state.groqKey, cerebrasKey: state.cerebrasKey },
-        (provider, msg, providers) => {
-          if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-          if (provider === "groq" || provider === "cerebras") {
-            resolvedProvider = provider;
-          }
-          setSetupStatus(msg);
-        },
-        {
-          groqMaxTokens: 2600,
-          cerebrasMaxTokens: 3200,
-        },
-      );
+      const onSetupStatus = (provider, msg, providers) => {
+        if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
+        if (provider === "groq" || provider === "cerebras") {
+          resolvedProvider = provider;
+        }
+        setSetupStatus(msg);
+      };
+
+      let parsed;
+      try {
+        parsed = await callAI(
+          PROJECT_SETUP_SYSTEM_PROMPT,
+          setupPaste,
+          { groqKey: state.groqKey, cerebrasKey: state.cerebrasKey },
+          onSetupStatus,
+          {
+            groqMaxTokens: 2600,
+            cerebrasMaxTokens: 3200,
+          },
+        );
+      } catch (e) {
+        if (
+          state.cerebrasKey &&
+          /truncated|finish_reason=length|response was cut off/i.test(e.message || "")
+        ) {
+          setSetupStatus("Setup response was too large for the fallback model. Retrying with a compact parser...");
+          parsed = await callAI(
+            PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
+            setupPaste,
+            { groqKey: "", cerebrasKey: state.cerebrasKey },
+            onSetupStatus,
+            {
+              cerebrasMaxTokens: 2600,
+            },
+          );
+          resolvedProvider = "cerebras";
+        } else {
+          throw e;
+        }
+      }
 
       const incomingProfile = normaliseProjectProfile({
         ...(parsed?.projectProfile || {}),

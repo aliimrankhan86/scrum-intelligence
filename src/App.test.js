@@ -4,7 +4,7 @@ import App, { meetingMergePolicy } from './App';
 import { DEFAULT_SPRINTS, MEETINGS } from './config';
 import { buildRovoMasterPrompt } from './features/sprint-review/promptTemplates/rovoMasterPrompt';
 import { buildPptFormatPrompt } from './features/sprint-review/promptTemplates/pptFormatPrompt';
-import { buildProjectSetupPrompt } from './projectProfile';
+import { buildProjectSetupPrompt, PROJECT_SETUP_COMPACT_SYSTEM_PROMPT, PROJECT_SETUP_SYSTEM_PROMPT } from './projectProfile';
 import { applyProjectSetupState, defaultState, STORE_KEY } from './store';
 
 beforeEach(() => {
@@ -1334,6 +1334,12 @@ test('default setup prompt stays generic before any project is configured', () =
   expect(prompt).not.toContain('- 1 | Sprint 1 | 2026-01-05 | 2026-01-18 | active');
   expect(prompt).not.toContain('RPAB');
   expect(prompt).not.toContain('UK Prospect Data Cleansing Automation');
+});
+
+test('project setup fallback parser stays more compact for Cerebras retries', () => {
+  expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT.length).toBeLessThan(PROJECT_SETUP_SYSTEM_PROMPT.length);
+  expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('Max counts');
+  expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('Return ONLY compact JSON');
 });
 
 test('applying project setup can switch the dashboard to a new project profile', () => {
