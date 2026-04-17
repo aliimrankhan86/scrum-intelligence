@@ -12,6 +12,7 @@ Meeting-note input is flexible by design. It works with Hedy, Apple Notes, Teams
 Current operating mode:
 - Rovo JSON is the primary path for `Project setup`, `Daily standup`, `Refinement`, `Sprint planning`, `Sprint review`, `Retrospective`, and `Velocity & insights`
 - OpenRouter support is kept in the app, but it may be unavailable at times
+- Provider/model badges are intentionally hidden from the main dashboard UI for now, but the OpenRouter routing and test flow remain available in `API keys`
 - If OpenRouter is unavailable, direct Rovo JSON still works for board, planning, review, and sprint updates
 - Meeting-note parsing remains optional and depends on OpenRouter being available
 
@@ -66,13 +67,14 @@ Rate-limit rule:
 The setup prompt is designed to gather:
 - project profile and workstreams / epics
 - active sprint and known upcoming sprints
-- recent completed sprint history with quantitative metrics when available
+- recent completed sprint history with epics, delivered tickets, carry-over tickets, and quantitative metrics when available
 - sprint cadence, including sprint duration and gap between sprints when known
 - active sprint board items grouped by status
 - current team members visible from the scrum board / active sprint context
 - watch tickets, current risks, and known decisions when available
 
 If team membership changes later, rerun `Project setup`. For the same project, the app updates team and setup context without wiping the current sprint data. If you switch to a different project, the app intentionally clears old project-specific sprint data.
+If the current sprint closes and Jira has already moved to the next sprint, rerunning `Project setup` will prefer the newer active sprint and generate the next sprint dates from cadence when needed.
 
 ## Run
 

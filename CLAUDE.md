@@ -34,6 +34,7 @@ UNION ALL SELECT 'Tested functions', COUNT(DISTINCT source) FROM edges WHERE kin
 
 - Assume OpenRouter may be unavailable for day-to-day use
 - Do not remove the OpenRouter capability; keep it intact for later reactivation
+- Keep provider routing/test logic intact, but keep provider/model badges hidden from the main dashboard UI unless explicitly re-enabled
 - Prefer direct JSON from Jira Rovo for `Project setup`, `Daily standup`, `Refinement`, `Sprint planning`, `Sprint review`, `Retrospective`, and `Velocity & insights`
 - These Rovo JSON flows should work without any LLM key when the pasted response already matches the dashboard JSON shape
 - Meeting-transcript parsing remains an optional LLM-assisted path and may be dormant until an API key is restored
@@ -42,6 +43,7 @@ UNION ALL SELECT 'Tested functions', COUNT(DISTINCT source) FROM edges WHERE kin
 
 - `projectProfile` is first-class state and drives project adaptation
 - `projectContext` is the lightweight runtime context used by dashboards and prompts
+- Sprint timeline logic must prefer the real active sprint and auto-generate the next sprint from cadence when the current sprint closes
 - All AI calls go through `src/api.js`
 - Prompt contracts live in `src/config.js`
 - Do not hardcode project-specific values when runtime profile data already exists

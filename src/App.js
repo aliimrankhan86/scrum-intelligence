@@ -80,6 +80,8 @@ const OPENROUTER_MODEL_META = Object.fromEntries(
   ]),
 );
 
+const SHOW_PROVIDER_STATUS_BADGES = false;
+
 const THEME_VARS = {
   dark: {
     "--app-bg0": "#090d12",
@@ -236,6 +238,7 @@ function isDirectMeetingPayload(value) {
     "ticketsInReview",
     "ticketsBlocked",
     "ticketsTodo",
+    "ticketsBacklog",
     "staleInProgress",
     "notPickedUp",
     "blockers",
@@ -269,6 +272,48 @@ function isDirectMeetingPayload(value) {
 function tryParseDirectMeetingPayload(raw) {
   const parsed = tryParseLooseJsonObject(raw);
   return isDirectMeetingPayload(parsed) ? parsed : null;
+}
+
+function collectMeetingEpicKeys(data) {
+  const epics = new Set();
+  [
+    ...(data?.ticketsDone || []),
+    ...(data?.ticketsInProgress || []),
+    ...(data?.ticketsInReview || []),
+    ...(data?.ticketsBlocked || []),
+    ...(data?.ticketsTodo || []),
+    ...(data?.ticketsBacklog || []),
+    ...(data?.staleInProgress || []),
+    ...(data?.notPickedUp || []),
+    ...(data?.blockers || []),
+  ].forEach((item) => {
+    const epic = textValue(item?.epic);
+    if (epic) epics.add(epic);
+  });
+  return epics;
+}
+
+function getStandupScopeGuardMessage(parsed, projectProfile) {
+  const noteTextBlob = [
+    textValue(parsed?.summary),
+    ...((parsed?.notes || []).map(noteText)),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const hasParentScopedJql = /(?:^|\W)parent\s*=|parent%20%3d/i.test(noteTextBlob);
+  const hasQuickFilter = /quickfilter=/i.test(noteTextBlob);
+  const workstreams = Array.isArray(projectProfile?.workstreams)
+    ? projectProfile.workstreams.filter((item) => textValue(item?.epic) || textValue(item?.epicName))
+    : [];
+  const epics = [...collectMeetingEpicKeys(parsed)];
+  const singleEpicScope = epics.length === 1 ? epics[0] : "";
+  const looksFiltered = hasParentScopedJql || (hasQuickFilter && workstreams.length > 1 && epics.length <= 1);
+
+  if (!looksFiltered) return "";
+
+  return singleEpicScope
+    ? `Rovo response appears filtered to ${singleEpicScope}, not the full active sprint. Clear Jira quick filters or epic-only JQL and rerun the standup prompt. This update was not applied.`
+    : "Rovo response appears filtered to a board sub-scope, not the full active sprint. Clear Jira quick filters or epic-only JQL and rerun the standup prompt. This update was not applied.";
 }
 
 function dedupeItems(items, getSignature) {
@@ -497,6 +542,7 @@ function deriveProjectContext(parsed, fallbackContext = DEFAULT_PROJECT_CONTEXT,
     ...(parsed?.ticketsInReview || []),
     ...(parsed?.ticketsBlocked || []),
     ...(parsed?.ticketsTodo || []),
+    ...(parsed?.ticketsBacklog || []),
     ...(parsed?.staleInProgress || []),
     ...(parsed?.notPickedUp || []),
     ...(parsed?.blockers || []),
@@ -543,6 +589,7 @@ function hasMeetingContent(data) {
     "ticketsInReview",
     "ticketsBlocked",
     "ticketsTodo",
+    "ticketsBacklog",
     "actions",
     "nextSteps",
     "decisions",
@@ -582,10 +629,215 @@ function archiveTicketLabel(item) {
   return [ticketId, summary].filter(Boolean).join(" — ");
 }
 
+function archiveSprintHistoryTicketLabel(item) {
+  const label = archiveTicketLabel(item);
+  const points = item?.storyPoints;
+  return points != null && points !== ""
+    ? `${label} (${points} pts)`
+    : label;
+}
+
 function archiveTextWithDetail(primary, detail) {
   const headline = textValue(primary);
   const extra = textValue(detail);
   return [headline, extra].filter(Boolean).join(" — ");
+}
+
+function normalizeArchiveTicket(item) {
+  if (!item || typeof item !== "object") return null;
+  const ticket = textValue(item.ticket || item.ticketId);
+  const summary = textValue(item.summary || item.title);
+  const assignee = textValue(item.assignee);
+  const epic = textValue(item.epic);
+  const epicName = textValue(item.epicName);
+  if (!ticket && !summary) return null;
+  return { ticket, summary, assignee, epic, epicName };
+}
+
+function archiveTicketSignature(item) {
+  const ticket = textValue(item?.ticket);
+  if (ticket) return ticket;
+  return [
+    textValue(item?.summary),
+    textValue(item?.epic),
+    textValue(item?.epicName),
+  ].join("|");
+}
+
+function uniqueArchiveTickets(items) {
+  return dedupeItems(
+    (items || []).map(normalizeArchiveTicket).filter(Boolean),
+    archiveTicketSignature,
+  );
+}
+
+function archiveStatusTicketGroups(data) {
+  return {
+    done: uniqueArchiveTickets(data?.ticketsDone),
+    inprog: uniqueArchiveTickets(data?.ticketsInProgress),
+    inreview: uniqueArchiveTickets(data?.ticketsInReview),
+    blocked: uniqueArchiveTickets(data?.ticketsBlocked),
+    todo: uniqueArchiveTickets(data?.ticketsTodo),
+    backlog: uniqueArchiveTickets(data?.ticketsBacklog),
+  };
+}
+
+function buildArchiveEpicRollup(statusTickets) {
+  const statusOrder = ["done", "inprog", "inreview", "blocked", "todo", "backlog"];
+  const epics = new Map();
+
+  statusOrder.forEach((status) => {
+    (statusTickets[status] || []).forEach((ticket) => {
+      const key = textValue(ticket.epic) || textValue(ticket.epicName);
+      if (!key) return;
+      if (!epics.has(key)) {
+        epics.set(key, {
+          epic: textValue(ticket.epic) || null,
+          epicName: textValue(ticket.epicName) || null,
+          counts: {
+            done: 0,
+            inprog: 0,
+            inreview: 0,
+            blocked: 0,
+            todo: 0,
+            backlog: 0,
+          },
+        });
+      }
+      epics.get(key).counts[status] += 1;
+    });
+  });
+
+  return [...epics.values()]
+    .map((item) => {
+      const total = Object.values(item.counts).reduce((sum, value) => sum + value, 0);
+      const open =
+        item.counts.inprog +
+        item.counts.inreview +
+        item.counts.blocked +
+        item.counts.todo +
+        item.counts.backlog;
+      return {
+        ...item,
+        total,
+        open,
+      };
+    })
+    .sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total;
+      if (b.counts.done !== a.counts.done) return b.counts.done - a.counts.done;
+      return textValue(a.epic || a.epicName).localeCompare(textValue(b.epic || b.epicName));
+    });
+}
+
+function buildSprintArchiveOverview(state, sprint, label) {
+  const sprintKey = `${sprint.num}_`;
+  const summaryLabel = textValue(sprint?.name) || label;
+  const standup = state.meetingData?.[`${sprintKey}standup`] || {};
+  const planning = state.meetingData?.[`${sprintKey}planning`] || {};
+  const refinement = state.meetingData?.[`${sprintKey}refinement`] || {};
+  const review = state.meetingData?.[`${sprintKey}review`] || {};
+  const reference = buildSprintReferenceData(state, sprint.num);
+  const statusTickets = archiveStatusTicketGroups(standup);
+  const metrics = deriveStandupMetrics({
+    ...standup,
+    ticketsDone: statusTickets.done,
+    ticketsInProgress: statusTickets.inprog,
+    ticketsInReview: statusTickets.inreview,
+    ticketsBlocked: statusTickets.blocked,
+    ticketsTodo: statusTickets.todo,
+    ticketsBacklog: statusTickets.backlog,
+  });
+  const total =
+    (Number(metrics.done) || 0) +
+    (Number(metrics.inprog) || 0) +
+    (Number(metrics.inreview) || 0) +
+    (Number(metrics.blocked) || 0) +
+    (Number(metrics.todo) || 0) +
+    (Number(metrics.backlog) || 0);
+  const remaining =
+    (Number(metrics.inprog) || 0) +
+    (Number(metrics.inreview) || 0) +
+    (Number(metrics.blocked) || 0) +
+    (Number(metrics.todo) || 0) +
+    (Number(metrics.backlog) || 0);
+  const epics = buildArchiveEpicRollup(statusTickets).slice(0, 6);
+  const deliveredTickets = uniqueArchiveTickets([
+    ...(review.completed || []),
+    ...statusTickets.done,
+  ]).slice(0, 8);
+  const openTickets = uniqueArchiveTickets([
+    ...(planning.carryForward || []),
+    ...(refinement.carryForward || []),
+    ...statusTickets.blocked,
+    ...statusTickets.inreview,
+    ...statusTickets.inprog,
+    ...statusTickets.todo,
+    ...statusTickets.backlog,
+  ]).slice(0, 8);
+  const keyDetails = dedupeItems(
+    [
+      ...(reference.blockers || []).map((item) =>
+        `Blocked: ${archiveTextWithDetail(archiveTicketLabel(item), item.detail)}`),
+      ...(reference.decisions || []).map((item) =>
+        `Decision: ${archiveTextWithDetail(item.decision, item.detail)}`),
+      ...(reference.risks || []).map((item) =>
+        `Risk: ${archiveTextWithDetail(item.risk, item.mitigation || item.detail)}`),
+      ...(reference.nextSteps || []).map((item) =>
+        `Next: ${archiveTextWithDetail(item.step || item.focus, item.detail)}`),
+    ].filter(Boolean),
+    (item) => item,
+  ).slice(0, 6);
+  const goal = firstValue(
+    standup?.sprintGoal,
+    review?.sprintGoal,
+    state.projectProfile?.goal,
+  );
+  const baseSummary =
+    total > 0
+      ? `${summaryLabel} closed with ${Number(metrics.done) || 0} done and ${remaining} still open${epics.length ? ` across ${epics.length} ${epics.length === 1 ? "epic" : "epics"}` : ""}.`
+      : firstValue(
+          textValue(review?.summary),
+          textValue(standup?.summary),
+          textValue(reference?.notes?.[0]),
+          `${summaryLabel} archived.`,
+        );
+  const summary = [
+    baseSummary,
+    goal ? `Goal: ${goal}.` : "",
+    openTickets[0] ? `Main carry-over: ${archiveTicketLabel(openTickets[0])}.` : "",
+    reference.blockers?.[0] ? `Main blocker: ${archiveTicketLabel(reference.blockers[0])}.` : "",
+  ].filter(Boolean).join(" ");
+
+  const hasContent =
+    textValue(summary) ||
+    deliveredTickets.length ||
+    openTickets.length ||
+    epics.length ||
+    keyDetails.length ||
+    total > 0;
+
+  if (!hasContent) return null;
+
+  return {
+    summary,
+    goal,
+    window: sprint?.start && sprint?.end ? `${sprint.start} to ${sprint.end}` : "",
+    metrics: {
+      done: Number(metrics.done) || 0,
+      inprog: Number(metrics.inprog) || 0,
+      inreview: Number(metrics.inreview) || 0,
+      blocked: Number(metrics.blocked) || 0,
+      todo: Number(metrics.todo) || 0,
+      backlog: Number(metrics.backlog) || 0,
+      total,
+      health: textValue(metrics.health),
+    },
+    epics,
+    deliveredTickets,
+    openTickets,
+    keyDetails,
+  };
 }
 
 function archiveMeetingHighlights(meetingId, data) {
@@ -663,6 +915,7 @@ function archiveMeetingHighlights(meetingId, data) {
 function buildSprintArchiveSnapshot(state, sprint, label, archivedAt) {
   const prefix = `${sprint.num}_`;
   const nextSprint = getNextSprint(state.sprints, sprint.num);
+  const overview = buildSprintArchiveOverview(state, sprint, label);
   const meetings = Object.entries(state.meetingData || {})
     .filter(([key]) => key.startsWith(prefix))
     .map(([key, data]) => {
@@ -689,6 +942,7 @@ function buildSprintArchiveSnapshot(state, sprint, label, archivedAt) {
     label,
     archivedAt,
     projectContext: state.projectContext || DEFAULT_PROJECT_CONTEXT,
+    overview,
     meetings,
     velocity: velocitySummary || velocityRecommendation
       ? {
@@ -708,6 +962,7 @@ function countSetupTickets(parsed) {
     ...(board.ticketsInReview || []),
     ...(board.ticketsBlocked || []),
     ...(board.ticketsTodo || []),
+    ...(board.ticketsBacklog || []),
   ].forEach((item) => {
     const key = firstValue(item?.ticket, item?.ticketId, item?.summary, item?.title);
     if (key) seen.add(key);
@@ -725,6 +980,7 @@ function countSetupEpics(parsed) {
     ...(board.ticketsInReview || []),
     ...(board.ticketsBlocked || []),
     ...(board.ticketsTodo || []),
+    ...(board.ticketsBacklog || []),
   ];
   const keys = new Set();
   workstreams.forEach((item) => {
@@ -775,14 +1031,15 @@ export function meetingMergePolicy(meetingId, source) {
   const isMeetingNotes = source === "Meeting notes" || source === "Notes/Hedy";
   const isRovoSnapshot = source === "Rovo/Jira";
   const isStandupHedy = meetingId === "standup" && isMeetingNotes;
+  const isStandupRovo = meetingId === "standup" && isRovoSnapshot;
   const isPlanningHedy = isPlanningLikeView(meetingId) && isMeetingNotes;
   const isPlanningRovo = isPlanningLikeView(meetingId) && isRovoSnapshot;
   const isReviewSnapshot = meetingId === "review" && isRovoSnapshot;
   const isRetroSnapshot = meetingId === "retro" && isRovoSnapshot;
   return {
     allowMetrics: !isStandupHedy,
-    allowProjectContext: !isStandupHedy,
-    allowSprintRename: !isStandupHedy,
+    allowProjectContext: !isStandupHedy && !isStandupRovo,
+    allowSprintRename: !isStandupHedy && !isStandupRovo,
     allowSummaryOverwrite: !isStandupHedy,
     overwriteFields: isStandupHedy
       ? ["actions", "nextSteps", "decisions", "risks", "notes"]
@@ -821,6 +1078,7 @@ export function meetingMergePolicy(meetingId, source) {
           "ticketsInReview",
           "ticketsBlocked",
           "ticketsTodo",
+          "ticketsBacklog",
           "blockers",
           "stale",
           "staleInProgress",
@@ -1465,7 +1723,8 @@ function deriveStandupMetrics(data) {
     Array.isArray(data.ticketsInProgress) ||
     Array.isArray(data.ticketsInReview) ||
     Array.isArray(data.ticketsBlocked) ||
-    Array.isArray(data.ticketsTodo);
+    Array.isArray(data.ticketsTodo) ||
+    Array.isArray(data.ticketsBacklog);
 
   if (!useTicketCounts) return metrics;
 
@@ -1476,6 +1735,7 @@ function deriveStandupMetrics(data) {
     inreview: Array.isArray(data.ticketsInReview) ? data.ticketsInReview.length : metrics.inreview,
     blocked: Array.isArray(data.ticketsBlocked) ? data.ticketsBlocked.length : metrics.blocked,
     todo: Array.isArray(data.ticketsTodo) ? data.ticketsTodo.length : metrics.todo,
+    backlog: Array.isArray(data.ticketsBacklog) ? data.ticketsBacklog.length : metrics.backlog,
   };
 }
 
@@ -2177,7 +2437,7 @@ function StandupDash({ data, fresh, sprint, jiraBase }) {
   const TODO_COLOR = "#64748b";
   const BACKLOG_COLOR = "#94a3b8";
   const activeTotal =
-    (m.done ?? 0) + (m.inprog ?? 0) + (m.inreview ?? 0) + (m.blocked ?? 0) + (m.todo ?? 0);
+    (m.done ?? 0) + (m.inprog ?? 0) + (m.inreview ?? 0) + (m.blocked ?? 0) + (m.todo ?? 0) + (m.backlog ?? 0);
 
   const handleFilter = (key) =>
     setActiveFilters((prev) =>
@@ -2225,6 +2485,14 @@ function StandupDash({ data, fresh, sprint, jiraBase }) {
       crossStatusTickets: data.ticketsBlocked,
       crossStatusLabel: "blocked",
     },
+    backlog: {
+      title: "Backlog tickets",
+      tickets: data.ticketsBacklog,
+      color: BACKLOG_COLOR,
+      pillLabel: "backlog",
+      crossStatusTickets: [],
+      crossStatusLabel: null,
+    },
   };
   const activeSections = activeFilters
     .map((key) => filteredSections[key])
@@ -2249,7 +2517,7 @@ function StandupDash({ data, fresh, sprint, jiraBase }) {
             <FilterMetricCard label="In Review"   value={m.inreview} color="#a78bfa" filterKey="inreview" activeFilters={activeFilters} onFilter={handleFilter} />
             <FilterMetricCard label="Blocked"     value={m.blocked}  color="#f87171" filterKey="blocked"  activeFilters={activeFilters} onFilter={handleFilter} warnBorder />
             <FilterMetricCard label="To Do"       value={m.todo}     color={TODO_COLOR} filterKey="todo"  activeFilters={activeFilters} onFilter={handleFilter} />
-            <FilterMetricCard label="Backlog"     value={m.backlog}  color={BACKLOG_COLOR} filterKey="backlog" activeFilters={activeFilters} onFilter={handleFilter} interactive={false} />
+            <FilterMetricCard label="Backlog"     value={m.backlog}  color={BACKLOG_COLOR} filterKey="backlog" activeFilters={activeFilters} onFilter={handleFilter} interactive />
           </div>
 
           <div style={{ fontSize: "13px", color: C.text1 }}>
@@ -2274,6 +2542,7 @@ function StandupDash({ data, fresh, sprint, jiraBase }) {
                   [m.inprog, "#3b82f6"],
                   [m.blocked, "#f87171"],
                   [m.todo, TODO_COLOR],
+                  [m.backlog, BACKLOG_COLOR],
                 ].map(([v, color], i) =>
                   v > 0 ? (
                     <div
@@ -2302,6 +2571,7 @@ function StandupDash({ data, fresh, sprint, jiraBase }) {
                   [m.inprog, "#3b82f6", "In prog"],
                   [m.blocked, "#f87171", "Blocked"],
                   [m.todo, TODO_COLOR, "To do"],
+                  [m.backlog, BACKLOG_COLOR, "Backlog"],
                 ].map(([v, color, label]) =>
                   v > 0 ? (
                     <span
@@ -3525,7 +3795,7 @@ function ProjectSetupPage({
 }) {
   const displayProjectKey = projectProfile.projectKey || "Project";
   const displayProjectName = projectProfile.projectName || "Run Project setup to load project context";
-  const displayEpicKey = projectContext.epic || projectProfile.projectKey || "Project context";
+  const displayEpicKey = projectProfile.primaryEpic || projectContext.epic || projectProfile.projectKey || "Project context";
 
   return (
     <div className="app-dashboard-stack">
@@ -3565,7 +3835,7 @@ function ProjectSetupPage({
         >
           {[
             `Current project: ${displayProjectKey} — ${displayProjectName}`,
-            `Primary epic: ${displayEpicKey}${projectContext.epicName ? ` — ${projectContext.epicName}` : ""}`,
+            `Primary epic: ${displayEpicKey}${(projectProfile.primaryEpicName || projectContext.epicName) ? ` — ${projectProfile.primaryEpicName || projectContext.epicName}` : ""}`,
             `Sprint naming: ${projectProfile.sprintNameTemplate || "Not configured"}`,
             projectProfile.sprintDurationDays
               ? `Sprint cadence: ${projectProfile.sprintDurationDays}-day sprint${projectProfile.sprintGapDays >= 0 ? ` · ${projectProfile.sprintGapDays} gap day${projectProfile.sprintGapDays === 1 ? "" : "s"}` : ""}`
@@ -4174,7 +4444,10 @@ export default function App() {
   }, [syncLatestSharedState]);
 
   const activeSprint =
-    state.sprints.find((s) => s.num === state.activeSprint) || state.sprints[0];
+    state.sprints.find((s) => Number(s.num) === Number(state.activeSprint)) ||
+    state.sprints.find((s) => s.active) ||
+    state.sprints[state.sprints.length - 1] ||
+    null;
   const projectProfile = normaliseProjectProfile(state.projectProfile || DEFAULT_PROJECT_PROFILE);
   const nextSprint = getNextSprint(state.sprints, state.activeSprint);
   const projectContext = {
@@ -4183,8 +4456,8 @@ export default function App() {
   };
   const displayProjectKey = projectProfile.projectKey || "Project";
   const displayProjectName = projectProfile.projectName || "Run Project setup to load project context";
-  const displayEpicKey = projectContext.epic || projectProfile.projectKey || "Project context";
-  const displayEpicName = projectContext.epicName || projectProfile.projectName || "Open Project setup to seed epic and sprint context";
+  const displayEpicKey = projectProfile.primaryEpic || projectContext.epic || projectProfile.projectKey || "Project context";
+  const displayEpicName = projectProfile.primaryEpicName || projectContext.epicName || projectProfile.projectName || "Open Project setup to seed epic and sprint context";
   const projectSetupPrompt = buildProjectSetupPrompt(projectProfile, state.sprints, state.sprintSummaries);
   const remoteSyncPending = sharedSyncEnabledRef.current && hasPendingRemoteSync(state);
   const sharedSyncCard = (() => {
@@ -4408,7 +4681,10 @@ export default function App() {
             new Date().toLocaleDateString("en-GB"),
           ),
         },
-        sprints: sorted,
+        sprints: sorted.map((item) => ({
+          ...item,
+          active: item.num === (nextSprint?.num || prev.activeSprint),
+        })),
         activeSprint: nextSprint?.num || prev.activeSprint,
       };
     });
@@ -4766,8 +5042,8 @@ export default function App() {
               : meeting;
           const ctx = buildContext(promptTemplate, activeSprint, {
             ...projectProfile,
-            epic: projectContext.epic,
-            name: projectContext.epicName || projectProfile.projectName,
+            epic: projectProfile.primaryEpic || projectContext.epic,
+            name: projectProfile.primaryEpicName || projectContext.epicName || projectProfile.projectName,
             nextSprint,
             recentSprintHistory: recentSprintHistoryForAI,
             lastUpdated: state.lastUpdated,
@@ -4788,6 +5064,17 @@ export default function App() {
             },
           );
         })();
+        const standupScopeGuard =
+          tool === "rovo" && curMeeting === "standup"
+            ? getStandupScopeGuardMessage(parsed, projectProfile)
+            : "";
+
+        if (standupScopeGuard) {
+          setStatus(standupScopeGuard);
+          showToast(standupScopeGuard, true);
+          setLoad(false);
+          return;
+        }
         const summary = applyParsed(
           parsed,
           tool === "rovo" ? "Rovo/Jira" : "Meeting notes",
@@ -4811,7 +5098,7 @@ export default function App() {
       }
       setLoad(false);
     },
-    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persistLocal, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, recentSprintHistoryForAI, showToast],
+    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persistLocal, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, recentSprintHistoryForAI, showToast, curMeeting],
   );
 
   const switchMeeting = (id) => {
@@ -5303,40 +5590,42 @@ export default function App() {
                   />
                 </div>
 
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      fontSize: "12px",
-                      padding: "10px 14px",
-                      borderRadius: "999px",
-                      border: `1px solid ${C.bd}`,
-                      color: C.text0,
-                      background: C.bg2,
-                      boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.04)}`,
-                    }}
-                  >
-                    <span
+                {SHOW_PROVIDER_STATUS_BADGES && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
+                    <div
                       style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: apiDot(),
-                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        fontSize: "12px",
+                        padding: "10px 14px",
+                        borderRadius: "999px",
+                        border: `1px solid ${C.bd}`,
+                        color: C.text0,
+                        background: C.bg2,
+                        boxShadow: `0 12px 24px ${alphaColor("#0f172a", 0.04)}`,
                       }}
-                    />
-                    {apiLabel()}
+                    >
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: apiDot(),
+                          flexShrink: 0,
+                        }}
+                      />
+                      {apiLabel()}
+                    </div>
+                    {OPENROUTER_MODEL_ORDER.map((modelKey) => (
+                      <ProviderStatusChip
+                        key={modelKey}
+                        name={OPENROUTER_MODEL_META[modelKey].chipLabel}
+                        info={aiStatus[modelKey]}
+                      />
+                    ))}
                   </div>
-                  {OPENROUTER_MODEL_ORDER.map((modelKey) => (
-                    <ProviderStatusChip
-                      key={modelKey}
-                      name={OPENROUTER_MODEL_META[modelKey].chipLabel}
-                      info={aiStatus[modelKey]}
-                    />
-                  ))}
-                </div>
+                )}
               </>
             )}
 
@@ -5689,7 +5978,13 @@ export default function App() {
                     color: C.text1,
                     cursor: "pointer",
                   }}
-                    onClick={() => persist({ activeSprint: s.num })}
+                    onClick={() => persist((prev) => ({
+                      activeSprint: s.num,
+                      sprints: (prev.sprints || []).map((item) => ({
+                        ...item,
+                        active: item.num === s.num,
+                      })),
+                    }))}
                   >
                     Set active
                   </button>
@@ -5896,6 +6191,66 @@ export default function App() {
                       {s.projectContext.epicName ? ` · ${s.projectContext.epicName}` : ""}
                     </div>
                   )}
+                  {s.overview && (
+                    <div style={{ marginTop: "10px", fontSize: "12px", lineHeight: "1.55" }}>
+                      <div style={{ fontWeight: "600", color: C.text0 }}>
+                        Sprint close summary
+                      </div>
+                      <div style={{ color: C.text1, marginTop: "4px" }}>
+                        {s.overview.summary}
+                      </div>
+                      {(s.overview.window || s.overview.goal) && (
+                        <div style={{ color: C.text2, marginTop: "4px" }}>
+                          {[s.overview.window, s.overview.goal ? `Goal: ${s.overview.goal}` : null].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                      {s.overview.metrics && (
+                        <div style={{ color: C.text2, marginTop: "4px" }}>
+                          Done {s.overview.metrics.done ?? 0} · In progress {s.overview.metrics.inprog ?? 0} · In review {s.overview.metrics.inreview ?? 0} · Blocked {s.overview.metrics.blocked ?? 0} · To do {s.overview.metrics.todo ?? 0} · Backlog {s.overview.metrics.backlog ?? 0}
+                        </div>
+                      )}
+                      {(s.overview.epics || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Epics in sprint close</div>
+                          {(s.overview.epics || []).map((item) => (
+                            <div key={`${item.epic || item.epicName}`} style={{ color: C.text1 }}>
+                              • {[item.epic, item.epicName].filter(Boolean).join(" · ") || "Unmapped epic"} · Done {item.counts?.done ?? 0} · Open {item.open ?? 0}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(s.overview.deliveredTickets || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Delivered items</div>
+                          {(s.overview.deliveredTickets || []).map((item) => (
+                            <div key={`done-${item.ticket || item.summary}`} style={{ color: C.text1 }}>
+                              • {archiveTicketLabel(item)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(s.overview.openTickets || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Open or carry-over items</div>
+                          {(s.overview.openTickets || []).map((item) => (
+                            <div key={`open-${item.ticket || item.summary}`} style={{ color: C.text1 }}>
+                              • {archiveTicketLabel(item)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(s.overview.keyDetails || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Key details</div>
+                          {(s.overview.keyDetails || []).map((item) => (
+                            <div key={item} style={{ color: C.text1 }}>
+                              • {item}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {s.setupHistory && (
                     <div style={{ marginTop: "10px", fontSize: "12px", lineHeight: "1.5" }}>
                       <div style={{ fontWeight: "600", color: C.text0 }}>
@@ -5914,6 +6269,36 @@ export default function App() {
                       {s.setupHistory.metrics && (
                         <div style={{ color: C.text2, marginTop: "3px" }}>
                           Points {s.setupHistory.metrics.completedPoints ?? "—"}/{s.setupHistory.metrics.committedPoints ?? "—"} · Tickets {s.setupHistory.metrics.completedTickets ?? "—"}/{s.setupHistory.metrics.committedTickets ?? "—"}
+                        </div>
+                      )}
+                      {(s.setupHistory.epics || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Epics in scope</div>
+                          {(s.setupHistory.epics || []).map((item) => (
+                            <div key={`${item.epic || item.epicName}`} style={{ color: C.text1 }}>
+                              • {[item.epic, item.epicName].filter(Boolean).join(" · ")}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(s.setupHistory.completedTickets || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Delivered tickets</div>
+                          {(s.setupHistory.completedTickets || []).map((item) => (
+                            <div key={`setup-done-${item.ticket || item.summary}`} style={{ color: C.text1 }}>
+                              • {archiveSprintHistoryTicketLabel(item)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(s.setupHistory.carryOverTickets || []).length > 0 && (
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ fontWeight: "600", color: C.text0 }}>Carry-over tickets</div>
+                          {(s.setupHistory.carryOverTickets || []).map((item) => (
+                            <div key={`setup-carry-${item.ticket || item.summary}`} style={{ color: C.text1 }}>
+                              • {archiveSprintHistoryTicketLabel(item)}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>

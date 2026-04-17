@@ -394,6 +394,7 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
 
   return [
     `Use current Jira / Confluence / project documentation / delivery notes to prepare a reusable first-time project setup pack for a Scrum dashboard.`,
+    `Goal: produce one authoritative project setup response the dashboard can reuse without manual cleanup.`,
     `This setup must let the dashboard adapt to any project with one response, so return current confirmed project context, recent sprint history, active sprint board data, and sprint cadence.`,
     `Do not assume missing details. If a value is not known, use null or [] rather than guessing.`,
     ``,
@@ -434,6 +435,9 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `    "goal": "sprint goal or null",`,
     `    "status": "completed | partial | slipped | cancelled | unknown | null",`,
     `    "summary": "one-line sprint outcome",`,
+    `    "epics": [{ "epic": "EPIC-1", "epicName": "epic title" }],`,
+    `    "completedTickets": [{ "ticket": "TICKET-1", "summary": "title", "epic": "EPIC-1", "epicName": "epic title", "storyPoints": 3 }],`,
+    `    "carryOverTickets": [{ "ticket": "TICKET-2", "summary": "title", "epic": "EPIC-1", "epicName": "epic title", "storyPoints": 5 }],`,
     `    "carryOver": ["ticket or carry-over theme"],`,
     `    "completedHighlights": ["notable delivered item"],`,
     `    "risks": ["key blocker, risk, or dependency"],`,
@@ -451,6 +455,7 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `    "ticketsInReview": [{ "ticket": "TICKET-3", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "In Review", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],`,
     `    "ticketsBlocked": [{ "ticket": "TICKET-4", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "Blocked", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title", "reason": "current blocker reason or null" }],`,
     `    "ticketsTodo": [{ "ticket": "TICKET-5", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "To Do", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],`,
+    `    "ticketsBacklog": [{ "ticket": "TICKET-6", "summary": "title", "type": "story | task | bug | spike | sub-task | null", "status": "Backlog", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],`,
     `    "blockers": [{ "title": "headline", "detail": "current blocker detail", "ticketId": "TICKET-4", "assignee": "name or unassigned", "epic": "EPIC-1", "epicName": "epic title" }],`,
     `    "staleInProgress": [{ "ticket": "TICKET-2", "summary": "title", "assignee": "name or unassigned", "days": 6, "epic": "EPIC-1", "epicName": "epic title" }],`,
     `    "notPickedUp": [{ "ticket": "TICKET-5", "summary": "title", "assignee": "name or unassigned", "days": 7, "epic": "EPIC-1", "epicName": "epic title" }],`,
@@ -467,14 +472,18 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `Rules:`,
     `- Use the current project and current active sprint, not historical defaults.`,
     `- Determine the actual live current sprint from Jira / Rovo / project delivery evidence and return it as both the sprint with "active": true and the numeric "activeSprint" value.`,
+    `- If the dashboard seed still shows the ending sprint but Jira now shows a newer sprint as current/open, return the newer sprint as active and include the old sprint in recentSprintHistory instead.`,
     `- If any dashboard seed context below conflicts with current Jira / Confluence / project evidence, trust the live project evidence and return the real current sprint.`,
     `- Prefer confirmed Jira / Confluence / project data over assumptions.`,
     `- Include recent sprint history as quantity data: prefer at least the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.`,
     `- If future sprint dates are not explicitly listed but cadence is clear from recent sprints or delivery notes, infer the next sprint dates from that cadence.`,
     `- Include sprint cadence when known: sprintDurationDays = inclusive sprint length, sprintGapDays = gap days between sprints.`,
     `- Use recentSprintHistory to capture carry-over, recurring blockers, and delivery trends from previous sprints.`,
+    `- For each item in recentSprintHistory, include the key epics in scope plus a concise delivered ticket list and carry-over ticket list when that evidence is available.`,
+    `- Use recentSprintHistory.metrics to capture achieved story points and completed item counts when Jira or delivery notes provide them.`,
     `- Include every epic / workstream currently being worked on in or materially affecting the active sprint.`,
     `- Include all current sprint user stories, tasks, bugs, spikes, and sub-tasks that matter for the board.`,
+    `- Include active sprint board tickets for Done, In Progress, In Review, Blocked, To Do, and Backlog when those statuses are visible in the board evidence.`,
     `- Include the current active sprint team from the scrum board / assignees when known, not only a generic team list.`,
     `- If team membership has changed, return the latest team only so rerunning setup refreshes the team list cleanly.`,
     `- If a ticket is both in progress and currently blocked / flagged, include it in both "ticketsInProgress" and "ticketsBlocked", and also add blocker detail in "blockers".`,
@@ -542,6 +551,9 @@ Schema:
   "recentSprintHistory": [{
     "num": 1, "name": "string", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD",
     "goal": "string|null", "status": "completed|partial|slipped|cancelled|unknown|null", "summary": "string|null",
+    "epics": [{ "epic": "string|null", "epicName": "string|null" }],
+    "completedTickets": [{ "ticket": "string", "summary": "string", "epic": "string|null", "epicName": "string|null", "storyPoints": 0 }],
+    "carryOverTickets": [{ "ticket": "string", "summary": "string", "epic": "string|null", "epicName": "string|null", "storyPoints": 0 }],
     "carryOver": ["string"], "completedHighlights": ["string"], "risks": ["string"],
     "metrics": { "committedPoints": 0, "completedPoints": 0, "committedTickets": 0, "completedTickets": 0 }
   }],
@@ -557,6 +569,7 @@ Schema:
     "ticketsInReview": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "In Review", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
     "ticketsBlocked": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "Blocked", "assignee": "string|null", "epic": "string|null", "epicName": "string|null", "reason": "string|null" }],
     "ticketsTodo": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "To Do", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
+    "ticketsBacklog": [{ "ticket": "string", "summary": "string", "type": "string|null", "status": "Backlog", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
     "blockers": [{ "title": "string", "detail": "string|null", "ticketId": "string|null", "assignee": "string|null", "epic": "string|null", "epicName": "string|null" }],
     "staleInProgress": [{ "ticket": "string", "summary": "string", "assignee": "string|null", "days": 6, "epic": "string|null", "epicName": "string|null" }],
     "notPickedUp": [{ "ticket": "string", "summary": "string", "assignee": "string|null", "days": 7, "epic": "string|null", "epicName": "string|null" }],
@@ -575,11 +588,15 @@ Rules:
 - Keep only current project data.
 - Infer a sprint name from the project key only when it is obvious.
 - Set the real active sprint in both "sprints[].active" and "activeSprint".
+- If the input evidence shows the next sprint is already open/current, do not keep the ending sprint active.
 - Prefer the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.
 - Infer future sprint dates only when cadence is clear from evidence.
+- For each recent sprint history item, include key epics plus delivered and carry-over tickets when evidence exists.
+- Use recentSprintHistory.metrics for story points achieved and completed item counts when known.
 - team and stakeholders must be unique people.
 - workstreams must cover the epics currently in play.
 - Include active sprint board data grouped by status.
+- Include ticketsBacklog when backlog-status or backlog-column tickets are visible in the board evidence.
 - A ticket can be in both ticketsInProgress and ticketsBlocked only when it is truly in progress and currently blocked.
 - Only classify blocked when the current Jira state or current impediment / flagged signal supports it.
 - Do not invent dates, Jira keys, assignees, metrics, or cadence.
@@ -603,13 +620,16 @@ Required projectProfile keys:
 dashboardTitle, projectLabel, projectKey, projectName, primaryEpic, primaryEpicName, goal, phase, what, scrumMasterName, scrumMasterRole, sprintNameTemplate, sprintDurationDays, sprintGapDays, reviewDeckReference, reviewDeckGuidance, workstreams, team, stakeholders, watchTickets, knownRisks, knownDecisions.
 
 Required activeSprintBoard keys:
-summary, sprintGoal, ragStatus, ragReason, metrics, epicsInPlay, ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo, blockers, staleInProgress, notPickedUp, questions, actions, nextSteps, decisions, risks, notes.
+summary, sprintGoal, ragStatus, ragReason, metrics, epicsInPlay, ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo, ticketsBacklog, blockers, staleInProgress, notPickedUp, questions, actions, nextSteps, decisions, risks, notes.
 
 Rules:
 - Set the real active sprint in both "sprints[].active" and "activeSprint".
+- If the input evidence shows the next sprint is already open/current, do not keep the ending sprint active.
 - Prefer last 2 completed sprints + active sprint + next 2 planned sprints when available.
 - Keep only current project information.
 - Keep output highly compressed and deduped.
+- Include ticketsBacklog when backlog-status or backlog-column tickets are visible in the board evidence.
+- recentSprintHistory items should include epics, completedTickets, carryOverTickets, and metrics when known.
 - Max counts: sprints 5, recentSprintHistory 3, workstreams/team/stakeholders/watchTickets/knownRisks/knownDecisions 6 each, epicsInPlay 6, ticket arrays 8 each, blockers/staleInProgress/notPickedUp/questions/actions/nextSteps/decisions/risks/notes/setupNotes 4 each.
 - Only classify blocked when current Jira evidence supports it.
 - Do not invent dates, Jira keys, assignees, metrics, or cadence.`;

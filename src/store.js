@@ -1,7 +1,9 @@
 import {
   DEFAULT_PROJECT_PROFILE,
+  buildSprintName,
   deriveProjectContextFromProfile,
   ensureUpcomingSprint,
+  generateFutureSprints,
   normaliseProjectProfile,
   normaliseSprints,
 } from './projectProfile';
@@ -157,6 +159,7 @@ function deriveBoardMetrics(board) {
   const inreview = cleanTicketList(board?.ticketsInReview).length;
   const blocked = cleanTicketList(board?.ticketsBlocked).length;
   const todo = cleanTicketList(board?.ticketsTodo).length;
+  const backlogCount = cleanTicketList(board?.ticketsBacklog).length;
   const backlog = Number(metrics.backlog);
   const total = Number(metrics.total);
   return {
@@ -165,8 +168,8 @@ function deriveBoardMetrics(board) {
     inreview: Number.isFinite(Number(metrics.inreview)) ? Number(metrics.inreview) : inreview,
     blocked: Number.isFinite(Number(metrics.blocked)) ? Number(metrics.blocked) : blocked,
     todo: Number.isFinite(Number(metrics.todo)) ? Number(metrics.todo) : todo,
-    backlog: Number.isFinite(backlog) ? backlog : 0,
-    total: Number.isFinite(total) ? total : done + inprog + inreview + blocked + todo,
+    backlog: Number.isFinite(backlog) ? backlog : backlogCount,
+    total: Number.isFinite(total) ? total : done + inprog + inreview + blocked + todo + backlogCount,
     health: textValue(metrics.health),
   };
 }
@@ -185,6 +188,7 @@ function deriveBoardWorkstreams(board) {
     ...(Array.isArray(board?.ticketsInReview) ? board.ticketsInReview : []),
     ...(Array.isArray(board?.ticketsBlocked) ? board.ticketsBlocked : []),
     ...(Array.isArray(board?.ticketsTodo) ? board.ticketsTodo : []),
+    ...(Array.isArray(board?.ticketsBacklog) ? board.ticketsBacklog : []),
     ...(Array.isArray(board?.blockers) ? board.blockers : []),
   ]
     .map((item) => ({
@@ -209,6 +213,7 @@ function deriveBoardTeam(board) {
     ...(Array.isArray(board?.ticketsInReview) ? board.ticketsInReview : []),
     ...(Array.isArray(board?.ticketsBlocked) ? board.ticketsBlocked : []),
     ...(Array.isArray(board?.ticketsTodo) ? board.ticketsTodo : []),
+    ...(Array.isArray(board?.ticketsBacklog) ? board.ticketsBacklog : []),
     ...(Array.isArray(board?.blockers) ? board.blockers : []),
   ]
     .map((item) => textValue(item?.assignee))
@@ -236,6 +241,54 @@ function cleanSetupHistoryMetrics(metrics) {
   return hasAnyValue ? cleaned : null;
 }
 
+function cleanHistoryEpics(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      epic: textValue(item?.epic),
+      epicName: textValue(item?.epicName),
+    }))
+    .filter((item) => item.epic || item.epicName)
+    .filter((item) => {
+      const key = `${item.epic}|${item.epicName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function cleanHistoryTicketList(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const ticket = textValue(item?.ticket || item?.ticketId);
+      const summary = textValue(item?.summary || item?.title);
+      if (!ticket && !summary) return null;
+      return {
+        ticket,
+        summary,
+        epic: textValue(item?.epic),
+        epicName: textValue(item?.epicName),
+        storyPoints: cleanMetricValue(item?.storyPoints),
+      };
+    })
+    .filter(Boolean)
+    .filter((item) => {
+      const key = `${item.ticket}|${item.summary}|${item.epic}|${item.epicName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function historyTicketText(item) {
+  const ticket = textValue(item?.ticket);
+  const summary = textValue(item?.summary);
+  const points = cleanMetricValue(item?.storyPoints);
+  const base = [ticket, summary].filter(Boolean).join(' — ');
+  return points != null ? `${base} (${points} pts)` : base;
+}
+
 function buildImportedSprintHistorySummary(item, projectContext, importedAt) {
   const num = Number(item?.num);
   if (!Number.isFinite(num)) return null;
@@ -244,15 +297,21 @@ function buildImportedSprintHistorySummary(item, projectContext, importedAt) {
   const summary = textValue(item?.summary) || textValue(item?.goal) || 'Imported sprint history from project setup';
   const goal = textValue(item?.goal);
   const status = textValue(item?.status);
+  const epics = cleanHistoryEpics(item?.epics);
+  const completedTickets = cleanHistoryTicketList(item?.completedTickets);
+  const carryOverTickets = cleanHistoryTicketList(item?.carryOverTickets);
   const carryOver = cleanUniqueStrings(item?.carryOver);
   const completedHighlights = cleanUniqueStrings(item?.completedHighlights);
   const risks = cleanUniqueStrings(item?.risks);
   const metrics = cleanSetupHistoryMetrics(item?.metrics);
   const highlights = [
+    ...epics.map((entry) => `Epic: ${[entry.epic, entry.epicName].filter(Boolean).join(' — ')}`),
+    ...completedTickets.map((entry) => `Delivered: ${historyTicketText(entry)}`),
+    ...carryOverTickets.map((entry) => `Carry-over: ${historyTicketText(entry)}`),
     ...completedHighlights.map((entry) => `Delivered: ${entry}`),
     ...carryOver.map((entry) => `Carry-over: ${entry}`),
     ...risks.map((entry) => `Risk: ${entry}`),
-  ].slice(0, 4);
+  ].slice(0, 6);
 
   const metricSummary = metrics
     ? [
@@ -290,6 +349,9 @@ function buildImportedSprintHistorySummary(item, projectContext, importedAt) {
         goal,
         status,
         summary,
+        epics,
+        completedTickets,
+        carryOverTickets,
         carryOver,
         completedHighlights,
         risks,
@@ -314,7 +376,7 @@ function buildImportedSprintHistorySummaries(items, projectContext, activeSprint
 
 export function createEmptyMeetingData() {
   return {
-    metrics: { todo: null, inprog: null, inreview: null, blocked: null, done: null, total: null, health: null },
+    metrics: { todo: null, inprog: null, inreview: null, blocked: null, done: null, backlog: null, total: null, health: null },
     questions: [],
     blockers: [],
     stale: [],
@@ -325,6 +387,7 @@ export function createEmptyMeetingData() {
     ticketsInReview: [],
     ticketsBlocked: [],
     ticketsTodo: [],
+    ticketsBacklog: [],
     actions: [],
     nextSteps: [],
     decisions: [],
@@ -357,6 +420,7 @@ function buildProjectSetupMeetingData(board, appliedAt) {
     ticketsInReview: cleanTicketList(board.ticketsInReview),
     ticketsBlocked: cleanTicketList(board.ticketsBlocked),
     ticketsTodo: cleanTicketList(board.ticketsTodo),
+    ticketsBacklog: cleanTicketList(board.ticketsBacklog),
     actions: cleanObjectItems(board.actions, ['focus', 'owner', 'why', 'detail', 'urgency', 'ticketId']),
     nextSteps: cleanObjectItems(board.nextSteps, ['step', 'owner', 'why', 'detail', 'timing']),
     decisions: cleanObjectItems(board.decisions, ['decision', 'owner', 'why', 'detail']),
@@ -372,6 +436,7 @@ function buildProjectSetupMeetingData(board, appliedAt) {
     seeded.ticketsInReview.length ||
     seeded.ticketsBlocked.length ||
     seeded.ticketsTodo.length ||
+    seeded.ticketsBacklog.length ||
     seeded.actions.length ||
     seeded.nextSteps.length ||
     seeded.decisions.length ||
@@ -392,6 +457,115 @@ function buildProjectSetupMeetingData(board, appliedAt) {
   return seeded;
 }
 
+function parseSprintWindowText(value) {
+  const text = textValue(value);
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})$/);
+  if (!match) return null;
+  return {
+    start: match[1],
+    end: match[2],
+  };
+}
+
+function buildSprintSeedFromArchive(summary, sprintNum, profile) {
+  if (!Number.isFinite(Number(sprintNum))) return null;
+  const window = parseSprintWindowText(summary?.overview?.window);
+  if (!window?.start || !window?.end) return null;
+  return {
+    num: Number(sprintNum),
+    name: buildSprintName(profile, Number(sprintNum)) || textValue(summary?.label) || `Sprint ${sprintNum}`,
+    start: window.start,
+    end: window.end,
+    active: false,
+  };
+}
+
+function collectReferencedSprintNumbers(rawState) {
+  const nums = new Set();
+  const push = (value) => {
+    const num = Number(value);
+    if (Number.isFinite(num)) nums.add(num);
+  };
+
+  push(rawState?.activeSprint);
+  (Array.isArray(rawState?.sprints) ? rawState.sprints : []).forEach((item) => push(item?.num));
+  Object.keys(rawState?.meetingData || {}).forEach((key) => push(String(key).split('_')[0]));
+  Object.keys(rawState?.reviewPromptContext || {}).forEach(push);
+  Object.keys(rawState?.sprintSummaries || {}).forEach(push);
+
+  return [...nums];
+}
+
+function normaliseHydratedSprintTimeline(rawState, base, projectProfile) {
+  let sprints = normaliseSprints(rawState?.sprints, projectProfile);
+  if (!sprints.length) {
+    sprints = normaliseSprints(base.sprints, projectProfile);
+  }
+
+  const sprintSummaries = rawState?.sprintSummaries && typeof rawState.sprintSummaries === 'object'
+    ? rawState.sprintSummaries
+    : {};
+  const archivedNums = Object.keys(sprintSummaries)
+    .map((key) => Number(key))
+    .filter((num) => Number.isFinite(num));
+  const highestArchived = archivedNums.length ? Math.max(...archivedNums) : null;
+  const archivedSeed =
+    highestArchived != null
+      ? buildSprintSeedFromArchive(sprintSummaries[highestArchived], highestArchived, projectProfile)
+      : null;
+
+  if (archivedSeed && !sprints.some((item) => item.num === archivedSeed.num)) {
+    sprints = normaliseSprints([...sprints, archivedSeed], projectProfile);
+  }
+
+  let activeSprint = Number(rawState?.activeSprint);
+  if (!Number.isFinite(activeSprint)) {
+    activeSprint = sprints.find((item) => item.active)?.num || null;
+  }
+
+  const maxSprintNum = sprints.length ? Math.max(...sprints.map((item) => item.num)) : 0;
+  if (
+    highestArchived != null &&
+    archivedSeed &&
+    (!Number.isFinite(activeSprint) || activeSprint <= highestArchived) &&
+    maxSprintNum <= highestArchived
+  ) {
+    activeSprint = highestArchived + 1;
+  }
+
+  const referencedNums = collectReferencedSprintNumbers(rawState);
+  const requiredMax = Math.max(
+    sprints.length ? Math.max(...sprints.map((item) => item.num)) : 0,
+    Number.isFinite(activeSprint) ? activeSprint : 0,
+    referencedNums.length ? Math.max(...referencedNums) : 0,
+  );
+  const currentMax = sprints.length ? Math.max(...sprints.map((item) => item.num)) : 0;
+  if (requiredMax > currentMax) {
+    sprints = generateFutureSprints(sprints, projectProfile, requiredMax - currentMax);
+  }
+
+  if (!Number.isFinite(activeSprint) || !sprints.some((item) => item.num === activeSprint)) {
+    activeSprint =
+      sprints.find((item) => item.active)?.num ||
+      sprints[sprints.length - 1]?.num ||
+      base.activeSprint;
+  }
+
+  sprints = ensureUpcomingSprint(
+    sprints.map((item) => ({
+      ...item,
+      active: item.num === activeSprint,
+    })),
+    projectProfile,
+    activeSprint,
+  ).map((item) => ({
+    ...item,
+    active: item.num === activeSprint,
+  }));
+
+  return { sprints, activeSprint };
+}
+
 export function hydrateState(rawState, defaultSprints) {
   const base = defaultState(defaultSprints);
   if (!rawState || typeof rawState !== 'object') return base;
@@ -399,12 +573,11 @@ export function hydrateState(rawState, defaultSprints) {
     ? normaliseProjectProfile(rawState.projectProfile)
     : base.projectProfile;
   const defaultProjectContext = deriveProjectContextFromProfile(projectProfile);
+  const { sprints, activeSprint } = normaliseHydratedSprintTimeline(rawState, base, projectProfile);
   return {
     ...base,
-    sprints: Array.isArray(rawState.sprints) && rawState.sprints.length
-      ? rawState.sprints
-      : base.sprints,
-    activeSprint: rawState.activeSprint || base.activeSprint,
+    sprints,
+    activeSprint,
     meetingData: rawState.meetingData && typeof rawState.meetingData === 'object'
       ? rawState.meetingData
       : base.meetingData,
@@ -692,6 +865,10 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
     nextSprints.find((sprint) => sprint.active)?.num ||
     nextSprints?.[0]?.num ||
     current.activeSprint;
+  nextSprints = nextSprints.map((sprint) => ({
+    ...sprint,
+    active: sprint.num === activeSprint,
+  }));
 
   const appliedAt = new Date().toISOString();
   const nextMeetingData = projectChanged ? {} : { ...(current.meetingData || {}) };

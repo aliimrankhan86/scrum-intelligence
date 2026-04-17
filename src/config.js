@@ -7,11 +7,11 @@ function promptProjectKey(projectContext, projectProfile = PROJECT) {
 }
 
 function promptEpicKey(projectContext, projectProfile = PROJECT) {
-  return projectContext?.epic || projectProfile?.primaryEpic || PROJECT.primaryEpic;
+  return projectProfile?.primaryEpic || projectContext?.epic || PROJECT.primaryEpic;
 }
 
 function promptEpicName(projectContext, projectProfile = PROJECT) {
-  return projectContext?.epicName || projectProfile?.primaryEpicName || PROJECT.primaryEpicName;
+  return projectProfile?.primaryEpicName || projectContext?.epicName || PROJECT.primaryEpicName;
 }
 
 function promptProjectName(projectProfile = PROJECT, projectContext) {
@@ -165,6 +165,10 @@ function buildRefinementRovoPrompt({ projectContext, projectProfile, sprint, nex
 
 This response must be directly usable by the dashboard without extra AI parsing.
 
+Your task
+- Produce one authoritative active-sprint dashboard snapshot for the Scrum lead.
+- Accuracy is more important than speed. If the Jira evidence is filtered or incomplete, stop, clear the filter, and rerun before answering.
+
 Current context
 - Project key: ${promptProjectKey(projectContext, projectProfile)}
 - Project name: ${promptProjectName(projectProfile, projectContext)}
@@ -175,6 +179,14 @@ Current context
 - Sprint goal hint: ${promptGoal(projectProfile) || 'not recorded'}
 - Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
 - Watch tickets: ${promptWatchTickets(projectProfile)}
+
+Retrieval checklist before answering
+1. Use the active sprint for project ${promptProjectKey(projectContext, projectProfile)} only.
+2. Remove Jira board quick filters, epic filters, parent filters, assignee filters, and personal filters.
+3. Check the whole active sprint across all workstreams listed above, not only the primary epic.
+4. If more than one workstream is listed above and your evidence only shows one epic or one filtered slice, stop, clear the filter, and rerun the retrieval.
+5. Recommended Jira scope: project = ${promptProjectKey(projectContext, projectProfile)} AND sprint IN openSprints().
+6. If you cannot verify the full active sprint unfiltered, do not approximate. Re-query first, then answer.
 
 Return JSON in exactly this shape:
 {
@@ -226,6 +238,14 @@ Current context
 - Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
 - Watch tickets: ${promptWatchTickets(projectProfile)}
 
+Retrieval checklist before answering
+1. Use the active sprint for project ${promptProjectKey(projectContext, projectProfile)} only.
+2. Remove Jira board quick filters, epic filters, parent filters, assignee filters, and personal filters.
+3. Check the whole active sprint across all workstreams listed above, not only the primary epic.
+4. If more than one workstream is listed above and your evidence only shows one epic or one filtered slice, stop, clear the filter, and rerun the retrieval.
+5. Recommended Jira scope: project = ${promptProjectKey(projectContext, projectProfile)} AND sprint IN openSprints().
+6. If you cannot verify the full active sprint unfiltered, do not approximate. Re-query first, then answer.
+
 Return JSON in exactly this shape:
 {
   "context": {
@@ -275,12 +295,20 @@ Current context
 - Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
 - Watch tickets: ${promptWatchTickets(projectProfile)}
 
+Retrieval checklist before answering
+1. Use the active sprint for project ${promptProjectKey(projectContext, projectProfile)} only.
+2. Remove Jira board quick filters, epic filters, parent filters, assignee filters, and personal filters.
+3. Check the whole active sprint across all workstreams listed above, not only the primary epic.
+4. If more than one workstream is listed above and your evidence only shows one epic or one filtered slice, stop, clear the filter, and rerun the retrieval.
+5. Recommended Jira scope: project = ${promptProjectKey(projectContext, projectProfile)} AND sprint IN openSprints().
+6. If you cannot verify the full active sprint unfiltered, do not approximate. Re-query first, then answer.
+
 Return JSON in exactly this shape:
 {
   "context": {
     "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
-    "epic": "${promptEpicKey(projectContext, projectProfile)}",
-    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "epic": null,
+    "epicName": null,
     "sprintName": "${promptSprintName(sprint, projectProfile)}"
   },
   "sprintGoal": { "achieved": true, "evidence": "one sentence using explicit sprint evidence" },
@@ -324,8 +352,8 @@ Return JSON in exactly this shape:
 {
   "context": {
     "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
-    "epic": "${promptEpicKey(projectContext, projectProfile)}",
-    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "epic": null,
+    "epicName": null,
     "sprintName": "${promptSprintName(sprint, projectProfile)}"
   },
   "wentWell": ["specific thing that helped delivery or team flow"],
@@ -364,6 +392,10 @@ Works with Hedy, Apple Notes, Teams transcript, Notion, Granola, other meeting n
 
 This response must be directly usable by the dashboard without any extra AI parsing.
 
+Your task
+- Produce one authoritative active-sprint dashboard snapshot for the Scrum lead.
+- Accuracy is more important than speed. If the Jira evidence is filtered or incomplete, stop, clear the filter, and rerun before answering.
+
 Current context
 - Project key: ${promptProjectKey(projectContext, projectProfile)}
 - Project name: ${promptProjectName(projectProfile, projectContext)}
@@ -375,12 +407,20 @@ Current context
 - Workstreams in play: ${promptWorkstreams(projectProfile, projectContext)}
 - Watch tickets: ${promptWatchTickets(projectProfile)}
 
+Retrieval checklist before answering
+1. Use the active sprint for project ${promptProjectKey(projectContext, projectProfile)} only.
+2. Remove Jira board quick filters, epic filters, parent filters, assignee filters, and personal filters.
+3. Check the whole active sprint across all workstreams listed above, not only the primary epic.
+4. If more than one workstream is listed above and your evidence only shows one epic or one filtered slice, stop, clear the filter, and rerun the retrieval.
+5. Recommended Jira scope: project = ${promptProjectKey(projectContext, projectProfile)} AND sprint IN openSprints().
+6. If you cannot verify the full active sprint unfiltered, do not approximate. Re-query first, then answer.
+
 Return JSON in exactly this shape:
 {
   "context": {
     "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
-    "epic": "${promptEpicKey(projectContext, projectProfile)}",
-    "epicName": "${promptEpicName(projectContext, projectProfile)}",
+    "epic": null,
+    "epicName": null,
     "sprintName": "${promptSprintName(sprint, projectProfile)}"
   },
   "metrics": {
@@ -397,6 +437,7 @@ Return JSON in exactly this shape:
   "ticketsInReview": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "ticketsBlocked": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "ticketsTodo": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "ticketsBacklog": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "staleInProgress": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "days": 5, "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "notPickedUp": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "days": 5, "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "blockers": [{ "title": "short blocker title", "detail": "current blocker detail", "ticketId": "TICKET-123", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
@@ -410,12 +451,23 @@ Return JSON in exactly this shape:
 }
 
 Rules:
+- This is a full active sprint response for the whole project sprint, across all active workstreams in play.
 - Use the live current sprint from Jira board evidence, not historical defaults.
 - Only include tickets that are currently in ${promptSprintName(sprint, projectProfile)} unless the field explicitly allows backlog/not picked up context.
+- Do not scope the response to a single epic, parent issue, assignee, or board quick filter unless the user explicitly asks for that narrower scope.
+- Do not use quick-filtered board URLs or epic-only JQL such as parent = EPIC for this dashboard update.
+- If the current Jira board view is filtered, clear the filter and re-check the whole active sprint for project ${promptProjectKey(projectContext, projectProfile)} before answering.
+- Cross-check the response against all workstreams listed above, not only the primary epic.
+- If multiple workstreams are listed above and the result only contains one epic, treat the result as incomplete and rerun the retrieval before answering.
+- Do not answer from a partial epic slice, a single quick-filtered swimlane, or a parent-scoped ticket list.
+- If the full sprint view spans multiple epics, set context.epic = null and context.epicName = null. Only set those fields when one epic genuinely represents the whole active sprint response.
 - metrics counts must match the ticket arrays.
+- metrics.backlog must match ticketsBacklog when backlog tickets are returned.
 - If a ticket is blocked, it must also appear in ticketsBlocked.
-- A ticket can appear in only one of ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo.
+- A ticket can appear in only one of ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo, ticketsBacklog.
 - blocked means blocked right now: current Jira status = Blocked or a current Flagged/Impediment signal. Do not infer blocked from old comments alone.
+- ticketsTodo = not-started tickets already committed to the active sprint.
+- ticketsBacklog = backlog-status or backlog-column items visible in the same project board context. Do not invent backlog items outside the verified board scope.
 - staleInProgress = currently In Progress with no movement for 5+ days.
 - notPickedUp = currently To Do or Backlog with no start.
 - Use null, [] or 0 when unknown. Do not guess.
@@ -436,6 +488,7 @@ Extract and return ONLY this JSON — no explanation, no markdown:
   "ticketsInReview": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "ticketsBlocked": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "ticketsTodo": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
+  "ticketsBacklog": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "staleInProgress": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "days": 5, "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "notPickedUp": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "days": 5, "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "blockers": [{ "title": "short title", "detail": "reason", "ticketId": "TICKET-123", "assignee": "name", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
@@ -451,17 +504,20 @@ Actions must be senior-scrum-master follow-ups, not a task log. focus = short he
 notes = unique senior-scrum-master briefing points, not a transcript dump. Each note must stand on its own, explain what matters now, and avoid repeating the same point in different words.
 If a note is about stale work, blockers, or not-started tickets, make the note specific and useful, not generic. Avoid vague notes such as "multiple tickets are stale" unless you also say what that means for the sprint.
 Do not repeat counts already obvious from the dashboard unless the count itself is the point.
-If epic information is present, always return both the epic Jira key and epic title. If either is missing, set it to "null".
+If the full sprint snapshot spans multiple epics, set context.epic = null and context.epicName = null. Only set them when one epic genuinely represents the whole active sprint response.
+If epic information is present on ticket-level items, always return both the epic Jira key and epic title. If either is missing, set it to "null".
 staleInProgress = tickets currently "In Progress" with no status change in 5+ days.
 notPickedUp = tickets in "To Do" or "Backlog" that no one has started yet.
-ticketsDone/ticketsInProgress/ticketsInReview/ticketsBlocked/ticketsTodo = current board state by status — extract ALL tickets in each status.
+ticketsDone/ticketsInProgress/ticketsInReview/ticketsBlocked/ticketsTodo/ticketsBacklog = current board state by status — extract ALL tickets in each status.
+ticketsTodo = not-started tickets already committed to the active sprint.
+ticketsBacklog = backlog-status or backlog-column items visible in the same project board context. Do not invent backlog items outside the verified board scope.
 Blocked logic:
 - Only place a ticket in ticketsBlocked or blockers if the input explicitly shows the ticket is blocked right now: current Jira status = Blocked, current Flagged/Impediment marker, or a transcript explicitly says it is blocked now.
 - Do not infer blocked from description text such as "waiting for business data", "dependency", "risk", "not provided", or "decision needed".
 - If the ticket status is In Progress, To Do, Selected for Sprint, In Review, or Done and there is no explicit blocked/impediment signal, do not place it in ticketsBlocked or blockers.
 - blockers must be a strict subset of ticketsBlocked and use the same ticket ids.
-- A ticket can appear in only one of ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo.
-- metrics.done, metrics.inprog, metrics.inreview, metrics.blocked, and metrics.todo must match the ticket arrays whenever the arrays are present.`,
+- A ticket can appear in only one of ticketsDone, ticketsInProgress, ticketsInReview, ticketsBlocked, ticketsTodo, ticketsBacklog.
+- metrics.done, metrics.inprog, metrics.inreview, metrics.blocked, metrics.todo, and metrics.backlog must match the ticket arrays whenever the arrays are present.`,
 
     notesSystemPrompt:
 `You extract standup meeting context for the Scrum lead on the current project.
@@ -482,6 +538,7 @@ Return ONLY this JSON — no explanation, no markdown:
   "ticketsInReview": [],
   "ticketsBlocked": [],
   "ticketsTodo": [],
+  "ticketsBacklog": [],
   "staleInProgress": [],
   "notPickedUp": [],
   "blockers": [],

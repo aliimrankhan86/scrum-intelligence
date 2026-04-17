@@ -26,10 +26,11 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.queryByText(/Start here/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/What this product does and how to use it/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/^Gemma 4 31B$/i)).toBeInTheDocument();
-  expect(screen.getByText(/^Llama 3\.3 70B$/i)).toBeInTheDocument();
-  expect(screen.getByText(/^Qwen 3 Coder$/i)).toBeInTheDocument();
-  expect(screen.getByText(/^Free Router$/i)).toBeInTheDocument();
+  expect(screen.queryByText(/^Gemma 4 31B$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Llama 3\.3 70B$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Qwen 3 Coder$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Free Router$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/OpenRouter ready/i)).not.toBeInTheDocument();
   expect(screen.getByText(/^Shared sync$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Local only$/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Dark$/i })).toBeInTheDocument();
@@ -375,6 +376,9 @@ test('daily standup applies valid Rovo JSON directly without requiring an API ke
       { ticket: 'RPAB-98', summary: 'Understand how to interact with Jira', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
     ],
     ticketsTodo: [],
+    ticketsBacklog: [
+      { ticket: 'RPAB-120', summary: 'Prepare CAB follow-up pack', assignee: 'Ali Khan', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
     staleInProgress: [],
     notPickedUp: [],
     blockers: [
@@ -406,8 +410,87 @@ test('daily standup applies valid Rovo JSON directly without requiring an API ke
     const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
     expect(saved.meetingData['4_standup'].summary).toBe('Standup: Jira interaction remains the main sprint risk.');
     expect(saved.meetingData['4_standup'].ticketsBlocked[0].ticket).toBe('RPAB-98');
+    expect(saved.meetingData['4_standup'].ticketsBacklog[0].ticket).toBe('RPAB-120');
     expect(saved.meetingData['4_standup'].actions[0].focus).toBe('Confirm Jira interaction approach');
   });
+});
+
+test('daily standup rejects epic-filtered Rovo JSON that is not a full active sprint view', async () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState([
+        { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true },
+      ]),
+      activeSprint: 4,
+      projectProfile: {
+        dashboardTitle: 'Scrum Intelligence',
+        projectLabel: 'RPAB',
+        projectKey: 'RPAB',
+        projectName: 'RPA Build',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        workstreams: [
+          { epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation', focus: 'Prospect data automation' },
+          { epic: 'RPAB-36', epicName: 'Letter Generation', focus: 'Letter generation stabilisation' },
+        ],
+      },
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-27',
+        epicName: 'UK Prospect Data Cleansing Automation',
+      },
+    }),
+  );
+
+  render(<App />);
+
+  const payload = {
+    context: {
+      projectKey: 'RPAB',
+      epic: 'RPAB-36',
+      epicName: 'Letter Generation',
+      sprintName: 'RPAB Sprint 4',
+    },
+    metrics: { done: 2, inprog: 1, inreview: 0, blocked: 0, todo: 0, backlog: 0, health: 'unknown' },
+    ticketsDone: [
+      { ticket: 'RPAB-105', summary: 'LG - Repeat system exceptions on Edge Print Dialog', assignee: 'Todd Slaughter', epic: 'RPAB-36', epicName: 'Letter Generation' },
+      { ticket: 'RPAB-106', summary: 'LG - Dispatcher failing at 365 Sign in Again pop-up', assignee: 'Todd Slaughter', epic: 'RPAB-36', epicName: 'Letter Generation' },
+    ],
+    ticketsInProgress: [
+      { ticket: 'RPAB-25', summary: 'Update Process Design documentation', assignee: 'Nick Baumer', epic: 'RPAB-36', epicName: 'Letter Generation' },
+    ],
+    ticketsInReview: [],
+    ticketsBlocked: [],
+    ticketsTodo: [],
+    staleInProgress: [],
+    notPickedUp: [],
+    blockers: [],
+    actions: [],
+    nextSteps: [],
+    decisions: [],
+    risks: [],
+    questions: [],
+    notes: [
+      'Board: https://universityofeastlondon.atlassian.net/jira/software/c/projects/RPAB/boards/2842?quickFilter=3880&quickFilter=3988',
+      'JQL used for RPAB-36 in open sprint(s): https://universityofeastlondon.atlassian.net/issues/?jql=project%20%3D%20RPAB%20AND%20parent%20%3D%20RPAB-36%20AND%20sprint%20IN%20%28openSprints%28%29%29',
+    ],
+    summary: 'RPAB-36 in the active sprint has 2 Done and 1 In Progress.',
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getAllByRole('button', { name: /Update dashboard/i })[0]);
+
+  await waitFor(() => {
+    expect(screen.getAllByText(/Rovo response appears filtered to RPAB-36/i).length).toBeGreaterThan(0);
+  });
+
+  const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
+  expect(saved.meetingData['4_standup']).toBeUndefined();
+  expect(saved.projectContext.epic).toBe('RPAB-27');
 });
 
 test('velocity and insights applies valid Rovo JSON directly without requiring an API key', async () => {
@@ -792,7 +875,7 @@ test('sprint reference rolls up summaries and key insight from other tabs', asyn
   expect(screen.getByText(/Team next steps to watch/i)).toBeInTheDocument();
   expect(screen.getByText(/Confirm whether CAB can still hold the current date/i)).toBeInTheDocument();
   expect(screen.getByText(/Cross-sprint notes and context/i)).toBeInTheDocument();
-  expect(screen.getByText(/Refinement: Next sprint should trial task-based estimation\./i)).toBeInTheDocument();
+  expect(screen.getByText(/Next sprint should trial task-based estimation\./i)).toBeInTheDocument();
 });
 
 test('sprint review prompt toolkit keeps the workflow simple and copies dynamic prompts cleanly', async () => {
@@ -1651,17 +1734,26 @@ test('project setup prompt is copyable and asks for a full adaptive project prof
   expect(prompt).toContain('"reviewDeckReference"');
   expect(prompt).toContain('"sprints"');
   expect(prompt).toContain('"recentSprintHistory"');
+  expect(prompt).toContain('"epics": [{ "epic": "EPIC-1", "epicName": "epic title" }]');
+  expect(prompt).toContain('"completedTickets"');
+  expect(prompt).toContain('"carryOverTickets"');
   expect(prompt).toContain('"activeSprintBoard"');
   expect(prompt).toContain('"epicsInPlay"');
   expect(prompt).toContain('"ticketsInProgress"');
+  expect(prompt).toContain('"ticketsBacklog"');
+  expect(prompt).toContain('Goal: produce one authoritative project setup response');
   expect(prompt).toContain('Include recent sprint history as quantity data');
   expect(prompt).toContain('infer the next sprint dates from that cadence');
+  expect(prompt).toContain('include the key epics in scope plus a concise delivered ticket list and carry-over ticket list');
+  expect(prompt).toContain('Use recentSprintHistory.metrics to capture achieved story points and completed item counts');
   expect(prompt).toContain('Include every epic / workstream currently being worked on');
   expect(prompt).toContain('Include all current sprint user stories, tasks, bugs, spikes, and sub-tasks');
+  expect(prompt).toContain('Include active sprint board tickets for Done, In Progress, In Review, Blocked, To Do, and Backlog');
   expect(prompt).toContain('Use current Jira / Confluence / project documentation / delivery notes');
   expect(prompt).toContain('Include the current active sprint team');
   expect(prompt).toContain('If team membership has changed, return the latest team only');
   expect(prompt).toContain('Determine the actual live current sprint from Jira / Rovo / project delivery evidence');
+  expect(prompt).toContain('If the dashboard seed still shows the ending sprint but Jira now shows a newer sprint as current/open');
   expect(prompt).toContain('Sprint cadence hint');
   expect(prompt).toContain('Current dashboard seed context');
   expect(prompt).toContain('Known workstreams in the dashboard');
@@ -1690,6 +1782,8 @@ test('project setup fallback parser stays more compact for OpenRouter retries', 
   expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT.length).toBeLessThan(PROJECT_SETUP_SYSTEM_PROMPT.length);
   expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('Max counts');
   expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('Return ONLY compact JSON');
+  expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('ticketsBacklog');
+  expect(PROJECT_SETUP_COMPACT_SYSTEM_PROMPT).toContain('If the input evidence shows the next sprint is already open/current');
 });
 
 test('applying project setup can switch the dashboard to a new project profile', () => {
@@ -1940,6 +2034,16 @@ test('project setup imports recent sprint history and derives team and workstrea
           end: '2026-05-18',
           summary: 'Validation work slipped due to access delays.',
           status: 'slipped',
+          epics: [
+            { epic: 'OPS-10', epicName: 'Operations Automation' },
+            { epic: 'OPS-12', epicName: 'Support Readiness' },
+          ],
+          completedTickets: [
+            { ticket: 'OPS-72', summary: 'Baseline workflow', epic: 'OPS-10', epicName: 'Operations Automation', storyPoints: 8 },
+          ],
+          carryOverTickets: [
+            { ticket: 'OPS-81', summary: 'Validation rules', epic: 'OPS-10', epicName: 'Operations Automation', storyPoints: 5 },
+          ],
           carryOver: ['OPS-81 validation rules'],
           completedHighlights: ['OPS-72 baseline workflow'],
           risks: ['API access delay'],
@@ -1981,6 +2085,22 @@ test('project setup imports recent sprint history and derives team and workstrea
   expect(next.projectProfile.workstreams.map((item) => item.epic)).toEqual(['OPS-10', 'OPS-12']);
   expect(next.sprints.map((sprint) => sprint.num)).toEqual([5, 6, 7, 8]);
   expect(next.sprintSummaries[5].setupHistory.summary).toBe('Validation work slipped due to access delays.');
+  expect(next.sprintSummaries[5].setupHistory.epics).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ epic: 'OPS-10', epicName: 'Operations Automation' }),
+      expect.objectContaining({ epic: 'OPS-12', epicName: 'Support Readiness' }),
+    ]),
+  );
+  expect(next.sprintSummaries[5].setupHistory.completedTickets).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ ticket: 'OPS-72', summary: 'Baseline workflow', storyPoints: 8 }),
+    ]),
+  );
+  expect(next.sprintSummaries[5].setupHistory.carryOverTickets).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ ticket: 'OPS-81', summary: 'Validation rules', storyPoints: 5 }),
+    ]),
+  );
   expect(next.sprintSummaries[6].setupHistory.metrics).toEqual(
     expect.objectContaining({
       committedPoints: 26,
@@ -2033,6 +2153,20 @@ test('standup Rovo prompt includes watch-ticket priority context', () => {
   expect(prompt).toContain('- Watch tickets: RPAB-101 | RPAB-205');
   expect(prompt).toContain('RPAB-101 | RPAB-205');
   expect(prompt).toContain('make sure their current Jira status is reflected accurately');
+  expect(prompt).toContain('Produce one authoritative active-sprint dashboard snapshot for the Scrum lead');
+  expect(prompt).toContain('"ticketsBacklog"');
+  expect(prompt).toContain('"epic": null');
+  expect(prompt).toContain('metrics.backlog must match ticketsBacklog');
+  expect(prompt).toContain('Retrieval checklist before answering');
+  expect(prompt).toContain('Recommended Jira scope: project = RPAB AND sprint IN openSprints()');
+  expect(prompt).toContain('Do not scope the response to a single epic');
+  expect(prompt).toContain('Do not use quick-filtered board URLs or epic-only JQL such as parent = EPIC');
+  expect(prompt).toContain('Cross-check the response against all workstreams listed above');
+  expect(prompt).toContain('If multiple workstreams are listed above and the result only contains one epic, treat the result as incomplete');
+  expect(prompt).toContain('Do not answer from a partial epic slice');
+  expect(prompt).toContain('If the full sprint view spans multiple epics, set context.epic = null and context.epicName = null');
+  expect(prompt).toContain('ticketsTodo = not-started tickets already committed to the active sprint');
+  expect(prompt).toContain('ticketsBacklog = backlog-status or backlog-column items visible in the same project board context');
 });
 
 test('refinement and planning Rovo prompts include inferred target sprint dates and strict JSON contracts', () => {
@@ -2118,15 +2252,30 @@ test('archived sprint history stores meeting and velocity insights for later ref
         '4_standup': {
           metrics: { done: 1, inprog: 2, inreview: 0, blocked: 1, todo: 0, backlog: 0, health: 'at risk' },
           questions: [],
-          blockers: [],
+          blockers: [{
+            ticketId: 'RPAB-98',
+            title: 'Jira interaction blocked',
+            detail: 'Need API route confirmation before close-out.',
+            assignee: 'Nick Baumer',
+            epic: 'RPAB-27',
+            epicName: 'UK Prospect Data Cleansing Automation',
+          }],
           stale: [],
           staleInProgress: [],
           notPickedUp: [],
-          ticketsDone: [],
-          ticketsInProgress: [],
+          ticketsDone: [
+            { ticket: 'RPAB-96', summary: 'Performer State Machine', assignee: 'Todd Slaughter', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+            { ticket: 'RPAB-105', summary: 'LG - Repeat system exceptions on Edge Print Dialog', assignee: 'Todd Slaughter', epic: 'RPAB-36', epicName: 'Letter Generation' },
+          ],
+          ticketsInProgress: [
+            { ticket: 'RPAB-25', summary: 'Update Process Design documentation', assignee: 'Nick Baumer', epic: 'RPAB-36', epicName: 'Letter Generation' },
+          ],
           ticketsInReview: [],
-          ticketsBlocked: [],
+          ticketsBlocked: [
+            { ticket: 'RPAB-98', summary: 'Understand how to interact with Jira', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+          ],
           ticketsTodo: [],
+          ticketsBacklog: [],
           actions: [],
           decisions: [],
           risks: [],
@@ -2198,16 +2347,26 @@ test('archived sprint history stores meeting and velocity insights for later ref
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
   expect(saved.activeSprint).toBe(5);
+  expect(saved.sprintSummaries['4'].overview.summary).toMatch(/Sprint 4 closed with 2 done and 2 still open across 2 epics/i);
+  expect(saved.sprintSummaries['4'].overview.deliveredTickets.map((item) => item.ticket)).toEqual(
+    expect.arrayContaining(['RPAB-96', 'RPAB-105']),
+  );
+  expect(saved.sprintSummaries['4'].overview.openTickets.map((item) => item.ticket)).toEqual(
+    expect.arrayContaining(['RPAB-98', 'RPAB-25']),
+  );
   expect(saved.sprintSummaries['4'].meetings[0].summary).toMatch(/Standup: sprint is at risk/i);
   const planningArchive = saved.sprintSummaries['4'].meetings.find((meeting) => meeting.id === 'planning');
   expect(planningArchive.label).toMatch(/Sprint planning \(for Sprint 5\)/i);
   expect(planningArchive.summary).toMatch(/Refinement: Sprint 5 needs clear carry-forward/i);
   expect(planningArchive.highlights).toContain('Carry forward: RPAB-98 — Understand how to interact with Jira');
   expect(planningArchive.highlights).toContain('Decision: RPAB-98 should carry into Sprint 5');
-  expect(screen.getByText(/Sprint planning \(for Sprint 5\)/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/Sprint planning \(for Sprint 5\)/i).length).toBeGreaterThan(0);
   expect(saved.sprintSummaries['4'].velocity.summary).toMatch(/Velocity is stable/i);
+  expect(screen.getByText(/Sprint close summary/i)).toBeInTheDocument();
+  expect(screen.getByText(/RPAB-96 — Performer State Machine/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/RPAB-98 — Understand how to interact with Jira/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Carry forward: RPAB-98 — Understand how to interact with Jira/i)).toBeInTheDocument();
-  expect(screen.getByText(/Decision: RPAB-98 should carry into Sprint 5/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/Decision: RPAB-98 should carry into Sprint 5/i).length).toBeGreaterThan(0);
 
   expect(screen.getAllByText(/Standup: sprint is at risk because Jira integration is still blocked\./i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Velocity is stable but completion is still below commitment\./i)).toBeInTheDocument();

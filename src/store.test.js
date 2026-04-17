@@ -5,6 +5,7 @@ import {
   extractLocalSettings,
   extractSharedDashboardState,
   hasMeaningfulSharedDashboardState,
+  hydrateState,
 } from './store';
 
 const DEFAULT_SPRINTS = [
@@ -63,4 +64,74 @@ test('detects whether there is meaningful shared dashboard content to bootstrap'
       DEFAULT_SPRINTS,
     ),
   ).toBe(true);
+});
+
+test('hydrateState normalises sprint numbers and active flags from shared snapshots', () => {
+  const next = hydrateState(
+    {
+      ...defaultState(DEFAULT_SPRINTS),
+      sprints: [
+        { num: '4', name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: false },
+        { num: '5', name: 'RPAB Sprint 5', start: '2026-04-15', end: '2026-04-28', active: false },
+      ],
+      activeSprint: '5',
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'RPA Build',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        sprintDurationDays: 14,
+        sprintGapDays: 0,
+      },
+    },
+    DEFAULT_SPRINTS,
+  );
+
+  expect(next.activeSprint).toBe(5);
+  expect(next.sprints.find((sprint) => sprint.num === 5)).toMatchObject({
+    name: 'RPAB Sprint 5',
+    start: '2026-04-15',
+    end: '2026-04-28',
+    active: true,
+  });
+});
+
+test('hydrateState promotes the active sprint after an archived sprint close and regenerates the next sprint from archive dates', () => {
+  const next = hydrateState(
+    {
+      ...defaultState(DEFAULT_SPRINTS),
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'RPA Build',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        sprintDurationDays: 14,
+        sprintGapDays: 0,
+      },
+      sprints: [
+        { num: 1, name: 'Sprint 1', start: '2026-01-05', end: '2026-01-18', active: false },
+        { num: 2, name: 'Sprint 2', start: '2026-01-19', end: '2026-02-01', active: true },
+      ],
+      activeSprint: 2,
+      sprintSummaries: {
+        4: {
+          label: 'RPAB Sprint 4 (1 Apr–14 Apr)',
+          overview: {
+            window: '2026-04-01 to 2026-04-14',
+          },
+        },
+      },
+    },
+    DEFAULT_SPRINTS,
+  );
+
+  expect(next.activeSprint).toBe(5);
+  expect(next.sprints.find((sprint) => sprint.num === 5)).toMatchObject({
+    name: 'RPAB Sprint 5',
+    start: '2026-04-15',
+    end: '2026-04-28',
+    active: true,
+  });
 });
