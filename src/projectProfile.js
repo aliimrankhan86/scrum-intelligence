@@ -473,6 +473,9 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `- Use the current project and current active sprint, not historical defaults.`,
     `- Determine the actual live current sprint from Jira / Rovo / project delivery evidence and return it as both the sprint with "active": true and the numeric "activeSprint" value.`,
     `- If the dashboard seed still shows the ending sprint but Jira now shows a newer sprint as current/open, return the newer sprint as active and include the old sprint in recentSprintHistory instead.`,
+    `- Every sprint number, sprint name, and sprint date must match the live Jira sprint timeline. Never renumber sprints relative to the dashboard seed or treat Sprint 1/2 placeholders as real evidence.`,
+    `- Cross-check "activeSprint", the sprint marked with "active": true, and the sprint name/date in Jira. If they disagree, return the verified Jira sprint as the active one and keep the other sprint only if it is genuine history.`,
+    `- If Jira shows Sprint 5 as current/open while the dashboard seed still says Sprint 2, return Sprint 5 as the active sprint and use Sprint 2 only if it is a real earlier sprint in the history.`,
     `- If any dashboard seed context below conflicts with current Jira / Confluence / project evidence, trust the live project evidence and return the real current sprint.`,
     `- Prefer confirmed Jira / Confluence / project data over assumptions.`,
     `- Include recent sprint history as quantity data: prefer at least the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.`,
@@ -481,6 +484,7 @@ export function buildProjectSetupPrompt(profile = DEFAULT_PROJECT_PROFILE, sprin
     `- Use recentSprintHistory to capture carry-over, recurring blockers, and delivery trends from previous sprints.`,
     `- For each item in recentSprintHistory, include the key epics in scope plus a concise delivered ticket list and carry-over ticket list when that evidence is available.`,
     `- Use recentSprintHistory.metrics to capture achieved story points and completed item counts when Jira or delivery notes provide them.`,
+    `- recentSprintHistory must preserve the real sprint numbering from Jira. Do not renumber history items to make them sequential if Jira uses different sprint ids or names.`,
     `- Include every epic / workstream currently being worked on in or materially affecting the active sprint.`,
     `- Include all current sprint user stories, tasks, bugs, spikes, and sub-tasks that matter for the board.`,
     `- Include active sprint board tickets for Done, In Progress, In Review, Blocked, To Do, and Backlog when those statuses are visible in the board evidence.`,
@@ -588,6 +592,8 @@ Rules:
 - Keep only current project data.
 - Infer a sprint name from the project key only when it is obvious.
 - Set the real active sprint in both "sprints[].active" and "activeSprint".
+- Sprint numbers, sprint names, and sprint dates must align to the real Jira timeline. Never renumber sprints to match stale dashboard placeholders.
+- If "activeSprint" disagrees with the sprint row marked active, use the verified Jira sprint as active and keep the other sprint only if it is real history.
 - If the input evidence shows the next sprint is already open/current, do not keep the ending sprint active.
 - Prefer the last 2 completed sprints, the active sprint, and the next 2 planned sprints when available.
 - Infer future sprint dates only when cadence is clear from evidence.
@@ -624,6 +630,8 @@ summary, sprintGoal, ragStatus, ragReason, metrics, epicsInPlay, ticketsDone, ti
 
 Rules:
 - Set the real active sprint in both "sprints[].active" and "activeSprint".
+- Keep sprint numbers, sprint names, and sprint dates aligned to Jira. Never renumber sprints to fit stale dashboard seed data.
+- If "activeSprint" conflicts with the sprint row marked active, trust the verified Jira sprint row.
 - If the input evidence shows the next sprint is already open/current, do not keep the ending sprint active.
 - Prefer last 2 completed sprints + active sprint + next 2 planned sprints when available.
 - Keep only current project information.

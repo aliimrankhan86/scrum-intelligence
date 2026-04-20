@@ -254,7 +254,7 @@ test('copy prompt uses current sprint and epic context automatically', async () 
     expect.stringContaining('- Primary epic: RPAB-88 | Student Intake Automation'),
   );
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-    expect.stringContaining('Current sprint: RPAB Sprint 5 | Sprint 5 | 2026-04-16 to 2026-04-29'),
+    expect.stringContaining('Dashboard sprint hint: RPAB Sprint 5 | Sprint 5 | 2026-04-16 to 2026-04-29'),
   );
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
     expect.stringContaining('Sprint cadence: 14 day sprint | 0 gap days'),
@@ -491,6 +491,155 @@ test('daily standup rejects epic-filtered Rovo JSON that is not a full active sp
   const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
   expect(saved.meetingData['4_standup']).toBeUndefined();
   expect(saved.projectContext.epic).toBe('RPAB-27');
+});
+
+test('daily standup rejects Rovo JSON for the wrong sprint number', async () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState([
+        { num: 5, name: 'RPAB Sprint 5', start: '2026-04-15', end: '2026-04-28', active: true },
+      ]),
+      activeSprint: 5,
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'RPA Build',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        workstreams: [
+          { epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation', focus: 'Prospect data automation' },
+          { epic: 'RPAB-36', epicName: 'Letter Generation', focus: 'Letter generation stabilisation' },
+        ],
+      },
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-27',
+        epicName: 'UK Prospect Data Cleansing Automation',
+      },
+    }),
+  );
+
+  render(<App />);
+
+  const payload = {
+    context: {
+      projectKey: 'RPAB',
+      epic: null,
+      epicName: null,
+      sprintName: 'RPAB Sprint 2',
+    },
+    metrics: { done: 1, inprog: 0, inreview: 0, blocked: 0, todo: 0, backlog: 0, health: 'unknown' },
+    ticketsDone: [
+      { ticket: 'RPAB-105', summary: 'Done work from the wrong sprint', assignee: 'Todd Slaughter', epic: 'RPAB-36', epicName: 'Letter Generation' },
+    ],
+    ticketsInProgress: [],
+    ticketsInReview: [],
+    ticketsBlocked: [],
+    ticketsTodo: [],
+    ticketsBacklog: [],
+    staleInProgress: [],
+    notPickedUp: [],
+    blockers: [],
+    actions: [],
+    nextSteps: [],
+    decisions: [],
+    risks: [],
+    questions: [],
+    notes: [],
+    summary: 'Wrong sprint payload.',
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getAllByRole('button', { name: /Update dashboard/i })[0]);
+
+  await waitFor(() => {
+    expect(screen.getAllByText(/Rovo response is for Sprint 2, but the dashboard is currently on Sprint 5\. This looks like an older sprint snapshot/i).length).toBeGreaterThan(0);
+  });
+
+  const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
+  expect(saved.meetingData['5_standup']).toBeUndefined();
+});
+
+test('daily standup promotes the dashboard to a newer sprint from verified Rovo JSON', async () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState([
+        { num: 2, name: 'Sprint 2', start: '2026-01-19', end: '2026-02-01', active: true },
+      ]),
+      activeSprint: 2,
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'RPA Build',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        sprintDurationDays: 14,
+        sprintGapDays: 0,
+      },
+      projectContext: {
+        projectKey: 'RPAB',
+        epic: 'RPAB-27',
+        epicName: 'UK Prospect Data Cleansing Automation',
+      },
+    }),
+  );
+
+  render(<App />);
+
+  const payload = {
+    context: {
+      projectKey: 'RPAB',
+      epic: null,
+      epicName: null,
+      sprintName: 'RPAB Sprint 5',
+    },
+    metrics: { done: 5, inprog: 2, inreview: 5, blocked: 0, todo: 0, backlog: 7, health: 'at risk' },
+    ticketsDone: [
+      { ticket: 'RPAB-25', summary: 'Update Process Design documentation', assignee: 'Nick Baumer', epic: 'RPAB-36', epicName: 'Letter Generation' },
+    ],
+    ticketsInProgress: [
+      { ticket: 'RPAB-98', summary: 'Understand how to interact with Jira', assignee: 'Nick Baumer', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
+    ticketsInReview: [],
+    ticketsBlocked: [],
+    ticketsTodo: [],
+    ticketsBacklog: [
+      { ticket: 'RPAB-61', summary: 'Assets transferred to Orchestrator Production tenant', assignee: 'unassigned', epic: 'RPAB-27', epicName: 'UK Prospect Data Cleansing Automation' },
+    ],
+    staleInProgress: [],
+    notPickedUp: [],
+    blockers: [],
+    actions: [],
+    nextSteps: [],
+    decisions: [],
+    risks: [],
+    questions: [],
+    notes: [
+      'Sprint 5 is active from 2026-04-15 to 2026-04-28 with goal: Achieve go-live for UK Prospect Datasets.',
+    ],
+    summary: 'RPAB Sprint 5 is at risk.',
+  };
+
+  fireEvent.change(screen.getByPlaceholderText(/Paste the Rovo JSON response here/i), {
+    target: { value: JSON.stringify(payload) },
+  });
+  await userEvent.click(screen.getAllByRole('button', { name: /Update dashboard/i })[0]);
+
+  await waitFor(() => {
+    const saved = JSON.parse(window.localStorage.getItem(STORE_KEY));
+    expect(saved.activeSprint).toBe(5);
+    expect(saved.sprints.find((sprint) => sprint.num === 5)).toMatchObject({
+      name: 'RPAB Sprint 5',
+      start: '2026-04-15',
+      end: '2026-04-28',
+      active: true,
+    });
+    expect(saved.meetingData['5_standup'].summary).toBe('RPAB Sprint 5 is at risk.');
+  });
 });
 
 test('velocity and insights applies valid Rovo JSON directly without requiring an API key', async () => {
@@ -1754,6 +1903,10 @@ test('project setup prompt is copyable and asks for a full adaptive project prof
   expect(prompt).toContain('If team membership has changed, return the latest team only');
   expect(prompt).toContain('Determine the actual live current sprint from Jira / Rovo / project delivery evidence');
   expect(prompt).toContain('If the dashboard seed still shows the ending sprint but Jira now shows a newer sprint as current/open');
+  expect(prompt).toContain('Every sprint number, sprint name, and sprint date must match the live Jira sprint timeline');
+  expect(prompt).toContain('Cross-check "activeSprint", the sprint marked with "active": true, and the sprint name/date in Jira');
+  expect(prompt).toContain('If Jira shows Sprint 5 as current/open while the dashboard seed still says Sprint 2');
+  expect(prompt).toContain('recentSprintHistory must preserve the real sprint numbering from Jira');
   expect(prompt).toContain('Sprint cadence hint');
   expect(prompt).toContain('Current dashboard seed context');
   expect(prompt).toContain('Known workstreams in the dashboard');
@@ -2004,6 +2157,36 @@ test('project setup cadence auto-generates the next sprint when only the active 
   });
 });
 
+test('project setup prefers the sprint row flagged active over a stale activeSprint number', () => {
+  const next = applyProjectSetupState(
+    defaultState([{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true }]),
+    {
+      projectProfile: {
+        projectKey: 'RPAB',
+        projectName: 'RPA Build',
+        primaryEpic: 'RPAB-27',
+        primaryEpicName: 'UK Prospect Data Cleansing Automation',
+        sprintNameTemplate: '{projectKey} Sprint {num}',
+        sprintDurationDays: 14,
+        sprintGapDays: 0,
+      },
+      sprints: [
+        { num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: false },
+        { num: 5, name: 'RPAB Sprint 5', start: '2026-04-15', end: '2026-04-28', active: true },
+      ],
+      activeSprint: 2,
+    },
+    [{ num: 4, name: 'RPAB Sprint 4', start: '2026-04-01', end: '2026-04-14', active: true }],
+  );
+
+  expect(next.activeSprint).toBe(5);
+  expect(next.sprints.find((sprint) => sprint.num === 5)).toMatchObject({
+    active: true,
+    start: '2026-04-15',
+    end: '2026-04-28',
+  });
+});
+
 test('project setup imports recent sprint history and derives team and workstreams from the active board when needed', () => {
   const next = applyProjectSetupState(
     defaultState([{ num: 1, name: 'Sprint 1', start: '2026-01-05', end: '2026-01-18', active: true }]),
@@ -2156,12 +2339,21 @@ test('standup Rovo prompt includes watch-ticket priority context', () => {
   expect(prompt).toContain('Produce one authoritative active-sprint dashboard snapshot for the Scrum lead');
   expect(prompt).toContain('"ticketsBacklog"');
   expect(prompt).toContain('"epic": null');
+  expect(prompt).toContain('"sprintNum": 4');
+  expect(prompt).toContain('"sprintStart": "YYYY-MM-DD"');
+  expect(prompt).toContain('"sprintEnd": "YYYY-MM-DD"');
   expect(prompt).toContain('metrics.backlog must match ticketsBacklog');
   expect(prompt).toContain('Retrieval checklist before answering');
+  expect(prompt).toContain('First verify the live open/current sprint number, name, and dates in Jira');
   expect(prompt).toContain('Recommended Jira scope: project = RPAB AND sprint IN openSprints()');
+  expect(prompt).toContain('Treat the dashboard sprint hint above as a hint, not the source of truth');
+  expect(prompt).toContain('If Jira shows Sprint 5 current/open and the hint says Sprint 2 or Sprint 4, answer for Sprint 5');
   expect(prompt).toContain('Do not scope the response to a single epic');
   expect(prompt).toContain('Do not use quick-filtered board URLs or epic-only JQL such as parent = EPIC');
   expect(prompt).toContain('Cross-check the response against all workstreams listed above');
+  expect(prompt).toContain('context.sprintName must be the verified live sprint name from Jira');
+  expect(prompt).toContain('context.sprintNum, context.sprintStart, and context.sprintEnd must describe that same verified live sprint');
+  expect(prompt).toContain('cross-check that context.sprintName, the open sprint number in Jira, and the board dates all describe the same live sprint');
   expect(prompt).toContain('If multiple workstreams are listed above and the result only contains one epic, treat the result as incomplete');
   expect(prompt).toContain('Do not answer from a partial epic slice');
   expect(prompt).toContain('If the full sprint view spans multiple epics, set context.epic = null and context.epicName = null');
@@ -2347,6 +2539,14 @@ test('archived sprint history stores meeting and velocity insights for later ref
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
   expect(saved.activeSprint).toBe(5);
+  expect(saved.sprintSummaries['4'].sprint).toMatchObject({
+    num: 4,
+    name: 'Sprint 4',
+    start: '2026-04-01',
+    end: '2026-04-14',
+  });
+  expect(saved.sprintSummaries['4'].overview.sprintNum).toBe(4);
+  expect(saved.sprintSummaries['4'].overview.sprintName).toBe('Sprint 4');
   expect(saved.sprintSummaries['4'].overview.summary).toMatch(/Sprint 4 closed with 2 done and 2 still open across 2 epics/i);
   expect(saved.sprintSummaries['4'].overview.deliveredTickets.map((item) => item.ticket)).toEqual(
     expect.arrayContaining(['RPAB-96', 'RPAB-105']),
@@ -2363,6 +2563,8 @@ test('archived sprint history stores meeting and velocity insights for later ref
   expect(screen.getAllByText(/Sprint planning \(for Sprint 5\)/i).length).toBeGreaterThan(0);
   expect(saved.sprintSummaries['4'].velocity.summary).toMatch(/Velocity is stable/i);
   expect(screen.getByText(/Sprint close summary/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/^Sprint 4$/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/2026-04-01 to 2026-04-14/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/RPAB-96 — Performer State Machine/i)).toBeInTheDocument();
   expect(screen.getAllByText(/RPAB-98 — Understand how to interact with Jira/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Carry forward: RPAB-98 — Understand how to interact with Jira/i)).toBeInTheDocument();

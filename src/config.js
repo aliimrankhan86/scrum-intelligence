@@ -309,7 +309,10 @@ Return JSON in exactly this shape:
     "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
     "epic": null,
     "epicName": null,
-    "sprintName": "${promptSprintName(sprint, projectProfile)}"
+    "sprintName": "${promptSprintName(sprint, projectProfile)}",
+    "sprintNum": ${promptSprintNum(sprint)},
+    "sprintStart": "${sprint?.start || "YYYY-MM-DD"}",
+    "sprintEnd": "${sprint?.end || "YYYY-MM-DD"}"
   },
   "sprintGoal": { "achieved": true, "evidence": "one sentence using explicit sprint evidence" },
   "completed": [{ "ticketId": "TICKET-123 or null", "summary": "what was demonstrably delivered or accepted" }],
@@ -354,7 +357,10 @@ Return JSON in exactly this shape:
     "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
     "epic": null,
     "epicName": null,
-    "sprintName": "${promptSprintName(sprint, projectProfile)}"
+    "sprintName": "${promptSprintName(sprint, projectProfile)}",
+    "sprintNum": ${promptSprintNum(sprint)},
+    "sprintStart": "${sprint?.start || "YYYY-MM-DD"}",
+    "sprintEnd": "${sprint?.end || "YYYY-MM-DD"}"
   },
   "wentWell": ["specific thing that helped delivery or team flow"],
   "didntGoWell": ["specific issue that hurt delivery or team flow"],
@@ -400,7 +406,7 @@ Current context
 - Project key: ${promptProjectKey(projectContext, projectProfile)}
 - Project name: ${promptProjectName(projectProfile, projectContext)}
 - Primary epic: ${promptEpicKey(projectContext, projectProfile)} | ${promptEpicName(projectContext, projectProfile)}
-- Current sprint: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
+- Dashboard sprint hint: ${promptSprintName(sprint, projectProfile)} | Sprint ${promptSprintNum(sprint)} | ${promptSprintWindow(sprint)}
 - Next sprint: ${promptNextSprintName(nextSprint, projectProfile, sprint)} | ${promptTargetSprintWindow(nextSprint, sprint, projectProfile)}
 - Sprint cadence: ${promptCadence(projectProfile)}
 - Sprint goal hint: ${promptGoal(projectProfile) || 'not recorded'}
@@ -408,12 +414,15 @@ Current context
 - Watch tickets: ${promptWatchTickets(projectProfile)}
 
 Retrieval checklist before answering
-1. Use the active sprint for project ${promptProjectKey(projectContext, projectProfile)} only.
-2. Remove Jira board quick filters, epic filters, parent filters, assignee filters, and personal filters.
-3. Check the whole active sprint across all workstreams listed above, not only the primary epic.
-4. If more than one workstream is listed above and your evidence only shows one epic or one filtered slice, stop, clear the filter, and rerun the retrieval.
-5. Recommended Jira scope: project = ${promptProjectKey(projectContext, projectProfile)} AND sprint IN openSprints().
-6. If you cannot verify the full active sprint unfiltered, do not approximate. Re-query first, then answer.
+1. First verify the live open/current sprint number, name, and dates in Jira for project ${promptProjectKey(projectContext, projectProfile)}.
+2. Use the verified active sprint for project ${promptProjectKey(projectContext, projectProfile)} only. Treat the dashboard sprint hint above as a hint, not the source of truth.
+3. If Jira shows a different current sprint than the dashboard sprint hint, answer for the Jira sprint instead and use that verified sprint name in context.sprintName.
+4. Never echo a stale sprint label from dashboard history. If Jira shows Sprint 5 current/open and the hint says Sprint 2 or Sprint 4, answer for Sprint 5.
+5. Remove Jira board quick filters, epic filters, parent filters, assignee filters, and personal filters.
+6. Check the whole active sprint across all workstreams listed above, not only the primary epic.
+7. If more than one workstream is listed above and your evidence only shows one epic or one filtered slice, stop, clear the filter, and rerun the retrieval.
+8. Recommended Jira scope: project = ${promptProjectKey(projectContext, projectProfile)} AND sprint IN openSprints().
+9. If you cannot verify the full active sprint unfiltered, do not approximate. Re-query first, then answer.
 
 Return JSON in exactly this shape:
 {
@@ -421,7 +430,10 @@ Return JSON in exactly this shape:
     "projectKey": "${promptProjectKey(projectContext, projectProfile)}",
     "epic": null,
     "epicName": null,
-    "sprintName": "${promptSprintName(sprint, projectProfile)}"
+    "sprintName": "${promptSprintName(sprint, projectProfile)}",
+    "sprintNum": ${promptSprintNum(sprint)},
+    "sprintStart": "${sprint?.start || "YYYY-MM-DD"}",
+    "sprintEnd": "${sprint?.end || "YYYY-MM-DD"}"
   },
   "metrics": {
     "done": 0,
@@ -452,12 +464,15 @@ Return JSON in exactly this shape:
 
 Rules:
 - This is a full active sprint response for the whole project sprint, across all active workstreams in play.
-- Use the live current sprint from Jira board evidence, not historical defaults.
-- Only include tickets that are currently in ${promptSprintName(sprint, projectProfile)} unless the field explicitly allows backlog/not picked up context.
+- Use the live current sprint from Jira board evidence, not historical defaults or the dashboard hint.
+- context.sprintName must be the verified live sprint name from Jira, including the correct sprint number.
+- context.sprintNum, context.sprintStart, and context.sprintEnd must describe that same verified live sprint.
+- Only include tickets that are currently in the verified active sprint unless the field explicitly allows backlog/not picked up context.
 - Do not scope the response to a single epic, parent issue, assignee, or board quick filter unless the user explicitly asks for that narrower scope.
 - Do not use quick-filtered board URLs or epic-only JQL such as parent = EPIC for this dashboard update.
 - If the current Jira board view is filtered, clear the filter and re-check the whole active sprint for project ${promptProjectKey(projectContext, projectProfile)} before answering.
 - Cross-check the response against all workstreams listed above, not only the primary epic.
+- Before returning JSON, cross-check that context.sprintName, the open sprint number in Jira, and the board dates all describe the same live sprint.
 - If multiple workstreams are listed above and the result only contains one epic, treat the result as incomplete and rerun the retrieval before answering.
 - Do not answer from a partial epic slice, a single quick-filtered swimlane, or a parent-scoped ticket list.
 - If the full sprint view spans multiple epics, set context.epic = null and context.epicName = null. Only set those fields when one epic genuinely represents the whole active sprint response.
@@ -481,7 +496,7 @@ The input is Rovo/Jira board data OR a standup transcript/notes.
 
 Extract and return ONLY this JSON — no explanation, no markdown:
 {
-  "context": { "projectKey": "PROJECT or null", "epic": "EPIC-1 or null", "epicName": "epic title or null", "sprintName": "current sprint name or null" },
+  "context": { "projectKey": "PROJECT or null", "epic": "EPIC-1 or null", "epicName": "epic title or null", "sprintName": "current sprint name or null", "sprintNum": 1, "sprintStart": "YYYY-MM-DD or null", "sprintEnd": "YYYY-MM-DD or null" },
   "metrics": { "done": null, "inprog": null, "inreview": null, "blocked": null, "todo": null, "backlog": null, "health": "on track|at risk|behind|unknown" },
   "ticketsDone": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
   "ticketsInProgress": [{ "ticket": "TICKET-123", "summary": "short title", "assignee": "name or unassigned", "epic": "EPIC-1 or null", "epicName": "epic title or null" }],
@@ -505,6 +520,7 @@ notes = unique senior-scrum-master briefing points, not a transcript dump. Each 
 If a note is about stale work, blockers, or not-started tickets, make the note specific and useful, not generic. Avoid vague notes such as "multiple tickets are stale" unless you also say what that means for the sprint.
 Do not repeat counts already obvious from the dashboard unless the count itself is the point.
 If the full sprint snapshot spans multiple epics, set context.epic = null and context.epicName = null. Only set them when one epic genuinely represents the whole active sprint response.
+context.sprintNum, context.sprintStart, and context.sprintEnd must match the same live sprint as context.sprintName.
 If epic information is present on ticket-level items, always return both the epic Jira key and epic title. If either is missing, set it to "null".
 staleInProgress = tickets currently "In Progress" with no status change in 5+ days.
 notPickedUp = tickets in "To Do" or "Backlog" that no one has started yet.

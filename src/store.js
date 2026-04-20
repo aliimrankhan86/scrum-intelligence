@@ -854,8 +854,8 @@ export function applyProjectSetupState(prevState, parsed, defaultSprints) {
   const incomingActiveSprint = Number(parsed?.activeSprint);
   const activeByFlag = nextSprints.find((sprint) => sprint.active)?.num;
   const provisionalActiveSprint =
-    (Number.isFinite(incomingActiveSprint) && nextSprints.find((sprint) => sprint.num === incomingActiveSprint)?.num) ||
     activeByFlag ||
+    (Number.isFinite(incomingActiveSprint) && nextSprints.find((sprint) => sprint.num === incomingActiveSprint)?.num) ||
     nextSprints?.[0]?.num ||
     current.activeSprint;
 

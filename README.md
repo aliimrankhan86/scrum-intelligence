@@ -40,6 +40,7 @@ Current operating mode:
 - Project setup flow that seeds the board from one Rovo response
 - Sprint archive history for quick future revisit
 - Sprint reference view that rolls key current-sprint information into one place
+- Archived sprint history now stores explicit sprint identity too: sprint number, sprint name, and sprint dates are saved inside each archive snapshot, not only inferred from the storage key
 
 ## First-Time Setup
 
@@ -75,6 +76,7 @@ The setup prompt is designed to gather:
 
 If team membership changes later, rerun `Project setup`. For the same project, the app updates team and setup context without wiping the current sprint data. If you switch to a different project, the app intentionally clears old project-specific sprint data.
 If the current sprint closes and Jira has already moved to the next sprint, rerunning `Project setup` will prefer the newer active sprint and generate the next sprint dates from cadence when needed.
+If a setup response marks one sprint row as `active: true` but the top-level `activeSprint` number disagrees, the app now trusts the flagged sprint row and keeps sprint history numbering aligned to Jira.
 
 ## Run
 
@@ -146,6 +148,8 @@ Standup rules:
 - Jira / Rovo remains the source of truth for status, counts, blocked work, and stale work.
 - Meeting notes add actions, next steps, decisions, risks, and briefing context.
 - The standup prompt is intentionally strict so the dashboard stays quantitative and useful for day-to-day Scrum leadership.
+- The copied standup prompt treats the dashboard sprint as a hint only and requires Rovo to verify the live open Jira sprint number, name, and dates before answering.
+- If a pasted standup payload is for a different sprint number than the dashboard's active sprint, the app rejects it instead of updating the board with stale sprint data.
 - If OpenRouter is unavailable, the Rovo board update still works; only transcript parsing is paused.
 
 Other ceremony prompts:

@@ -293,7 +293,127 @@ function collectMeetingEpicKeys(data) {
   return epics;
 }
 
-function getStandupScopeGuardMessage(parsed, projectProfile) {
+function extractSprintNumberFromLabel(value) {
+  const text = textValue(value);
+  if (!text) return null;
+  const sprintMatch = text.match(/\bsprint\s+(\d+)\b/i);
+  if (sprintMatch) {
+    const num = Number(sprintMatch[1]);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function extractSprintWindowFromText(value) {
+  const text = textValue(value);
+  if (!text) return null;
+  const match = text.match(/(\d{4}-\d{2}-\d{2})\s+(?:to|-)\s+(\d{4}-\d{2}-\d{2})/i);
+  if (!match) return null;
+  return {
+    start: match[1],
+    end: match[2],
+  };
+}
+
+function extractSprintWindowFromPayload(parsed) {
+  const context = parsed?.context || {};
+  const directStart = textValue(context?.sprintStart || context?.start);
+  const directEnd = textValue(context?.sprintEnd || context?.end);
+  if (directStart && directEnd) {
+    return {
+      start: directStart,
+      end: directEnd,
+    };
+  }
+
+  const textSources = [
+    textValue(parsed?.summary),
+    ...((parsed?.notes || []).map(noteText)),
+  ].filter(Boolean);
+
+  for (const source of textSources) {
+    const match = extractSprintWindowFromText(source);
+    if (match) return match;
+  }
+
+  return null;
+}
+
+function resolveStandupSprintFrame(parsed, sprints, projectProfile) {
+  const sprintName = textValue(parsed?.context?.sprintName);
+  const explicitNum = Number(parsed?.context?.sprintNum);
+  const sprintNum = Number.isFinite(explicitNum) ? explicitNum : extractSprintNumberFromLabel(sprintName);
+  const items = Array.isArray(sprints) ? sprints : [];
+  const existing =
+    items.find((item) => Number(item?.num) === Number(sprintNum)) ||
+    items.find((item) => textValue(item?.name).toLowerCase() === sprintName.toLowerCase()) ||
+    null;
+  const window = extractSprintWindowFromPayload(parsed) || {};
+  const resolvedNum = Number.isFinite(sprintNum) ? sprintNum : Number(existing?.num);
+
+  if (!Number.isFinite(resolvedNum)) return null;
+
+  return {
+    num: resolvedNum,
+    name: sprintName || existing?.name || buildSprintName(projectProfile, resolvedNum),
+    start: window.start || existing?.start || "",
+    end: window.end || existing?.end || "",
+  };
+}
+
+function alignStandupSprintTimeline(sprints, activeSprintNum, frame, projectProfile) {
+  if (!frame || !Number.isFinite(Number(frame.num))) {
+    return {
+      sprints: Array.isArray(sprints) ? sprints : [],
+      activeSprint: activeSprintNum,
+    };
+  }
+
+  let nextSprints = Array.isArray(sprints) ? [...sprints] : [];
+  const currentMax = nextSprints.reduce((max, item) => Math.max(max, Number(item?.num) || 0), 0);
+  if (frame.num > currentMax) {
+    nextSprints = generateFutureSprints(nextSprints, projectProfile, frame.num - currentMax);
+  }
+
+  let found = false;
+  nextSprints = nextSprints.map((item) => {
+    if (Number(item?.num) !== Number(frame.num)) return item;
+    found = true;
+    return {
+      ...item,
+      name: frame.name || item.name,
+      start: frame.start || item.start,
+      end: frame.end || item.end,
+    };
+  });
+
+  if (!found && frame.start && frame.end) {
+    nextSprints = [
+      ...nextSprints,
+      {
+        num: Number(frame.num),
+        name: frame.name || buildSprintName(projectProfile, Number(frame.num)),
+        start: frame.start,
+        end: frame.end,
+        active: false,
+      },
+    ];
+  }
+
+  nextSprints = nextSprints
+    .sort((a, b) => Number(a.num) - Number(b.num))
+    .map((item) => ({
+      ...item,
+      active: Number(item.num) === Number(frame.num),
+    }));
+
+  return {
+    sprints: nextSprints,
+    activeSprint: Number(frame.num),
+  };
+}
+
+function getStandupScopeGuardMessage(parsed, projectProfile, activeSprintNum) {
   const noteTextBlob = [
     textValue(parsed?.summary),
     ...((parsed?.notes || []).map(noteText)),
@@ -308,6 +428,16 @@ function getStandupScopeGuardMessage(parsed, projectProfile) {
   const epics = [...collectMeetingEpicKeys(parsed)];
   const singleEpicScope = epics.length === 1 ? epics[0] : "";
   const looksFiltered = hasParentScopedJql || (hasQuickFilter && workstreams.length > 1 && epics.length <= 1);
+  const payloadSprintNum = extractSprintNumberFromLabel(parsed?.context?.sprintName);
+  const expectedSprintNum = Number(activeSprintNum);
+
+  if (
+    Number.isFinite(payloadSprintNum) &&
+    Number.isFinite(expectedSprintNum) &&
+    payloadSprintNum < expectedSprintNum
+  ) {
+    return `Rovo response is for Sprint ${payloadSprintNum}, but the dashboard is currently on Sprint ${expectedSprintNum}. This looks like an older sprint snapshot. Re-run the standup prompt for the live active sprint. This update was not applied.`;
+  }
 
   if (!looksFiltered) return "";
 
@@ -820,6 +950,8 @@ function buildSprintArchiveOverview(state, sprint, label) {
   if (!hasContent) return null;
 
   return {
+    sprintNum: Number(sprint?.num) || null,
+    sprintName: summaryLabel,
     summary,
     goal,
     window: sprint?.start && sprint?.end ? `${sprint.start} to ${sprint.end}` : "",
@@ -941,6 +1073,12 @@ function buildSprintArchiveSnapshot(state, sprint, label, archivedAt) {
   return {
     label,
     archivedAt,
+    sprint: {
+      num: Number(sprint?.num) || null,
+      name: textValue(sprint?.name) || label,
+      start: textValue(sprint?.start),
+      end: textValue(sprint?.end),
+    },
     projectContext: state.projectContext || DEFAULT_PROJECT_CONTEXT,
     overview,
     meetings,
@@ -4890,6 +5028,24 @@ export default function App() {
 
       const applied = persist((prev) => {
         const next = { ...prev, lastUpdated: ts };
+        if (curMeeting === "standup" && source === "Rovo/Jira") {
+          const standupFrame = resolveStandupSprintFrame(parsed, next.sprints || [], next.projectProfile || projectProfile);
+          const payloadSprintNum = Number(standupFrame?.num);
+          const currentSprintNum = Number(next.activeSprint);
+          if (
+            Number.isFinite(payloadSprintNum) &&
+            (!Number.isFinite(currentSprintNum) || payloadSprintNum >= currentSprintNum)
+          ) {
+            const alignedTimeline = alignStandupSprintTimeline(
+              next.sprints || [],
+              next.activeSprint,
+              standupFrame,
+              next.projectProfile || projectProfile,
+            );
+            next.sprints = alignedTimeline.sprints;
+            next.activeSprint = alignedTimeline.activeSprint;
+          }
+        }
         const key = `${next.activeSprint}_${curMeeting}`;
         const d = getMeetingData(next, next.activeSprint, curMeeting);
 
@@ -5008,7 +5164,7 @@ export default function App() {
       setFresh(newFresh);
       return parsed.summary;
     },
-    [curMeeting, meeting, persist],
+    [curMeeting, meeting, persist, projectProfile],
   );
 
   const runCapture = useCallback(
@@ -5066,7 +5222,7 @@ export default function App() {
         })();
         const standupScopeGuard =
           tool === "rovo" && curMeeting === "standup"
-            ? getStandupScopeGuardMessage(parsed, projectProfile)
+            ? getStandupScopeGuardMessage(parsed, projectProfile, activeSprint?.num || state.activeSprint)
             : "";
 
         if (standupScopeGuard) {
@@ -6173,6 +6329,18 @@ export default function App() {
                     marginBottom: "10px",
                   }}
                 >
+                  {(() => {
+                    const archivedSprintNum = s.sprint?.num;
+                    const archivedSprintName = textValue(s.sprint?.name);
+                    const genericSprintName =
+                      archivedSprintNum != null ? `Sprint ${archivedSprintNum}` : "";
+                    const historyTitle =
+                      archivedSprintNum != null
+                        ? archivedSprintName && archivedSprintName !== genericSprintName
+                          ? `Sprint ${archivedSprintNum} · ${archivedSprintName}`
+                          : `Sprint ${archivedSprintNum}`
+                        : s.label;
+                    return (
                   <div
                     style={{
                       fontSize: "13px",
@@ -6180,11 +6348,18 @@ export default function App() {
                       marginBottom: "2px",
                     }}
                   >
-                    {s.label}
+                    {historyTitle}
                   </div>
+                    );
+                  })()}
                   <div style={{ fontSize: "11px", color: C.text2 }}>
                     Archived {s.archivedAt}
                   </div>
+                  {(s.sprint?.start || s.sprint?.end) && (
+                    <div style={{ fontSize: "11px", color: C.text2, marginTop: "4px" }}>
+                      {[s.sprint?.start, s.sprint?.end].filter(Boolean).join(" to ")}
+                    </div>
+                  )}
                   {s.projectContext?.epic && (
                     <div style={{ fontSize: "11px", color: C.text1, marginTop: "6px" }}>
                       {s.projectContext.epic}
@@ -6199,6 +6374,11 @@ export default function App() {
                       <div style={{ color: C.text1, marginTop: "4px" }}>
                         {s.overview.summary}
                       </div>
+                      {(s.overview.sprintNum != null || s.overview.sprintName) && (
+                        <div style={{ color: C.text2, marginTop: "4px" }}>
+                          {[s.overview.sprintNum != null ? `Sprint ${s.overview.sprintNum}` : null, s.overview.sprintName].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
                       {(s.overview.window || s.overview.goal) && (
                         <div style={{ color: C.text2, marginTop: "4px" }}>
                           {[s.overview.window, s.overview.goal ? `Goal: ${s.overview.goal}` : null].filter(Boolean).join(" · ")}
