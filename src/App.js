@@ -1,11 +1,22 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import "./App.css";
 import { MEETINGS, DEFAULT_SPRINTS } from "./config";
-import { callAI, buildContext, testProviders } from "./api";
+import { callAI, testProviders } from "./api";
 import {
-  OPENROUTER_MODEL_CHAIN,
-  OPENROUTER_MODEL_ORDER,
-  OPENROUTER_PROVIDER,
+  getDashboardAIUnavailableMessage,
+  getDashboardAIKeys,
+  getDashboardCaptureSource,
+  getDirectDashboardJsonStatus,
+  getDirectDashboardJsonSuccessLabel,
+  hasDashboardAIKey,
+  parseDashboardCaptureWithAI,
+} from "./aiDashboardAdapter";
+import {
+  AI_MODEL_CHAIN,
+  AI_MODEL_ORDER,
+  AI_ROUTER_PROVIDER,
+  getPreferredAIProvider,
+  hasAIModelKey,
 } from "./aiProviders";
 import {
   applyProjectSetupState,
@@ -73,8 +84,8 @@ const C = {
   tealBg: "var(--app-teal-bg)",
 };
 
-const OPENROUTER_MODEL_META = Object.fromEntries(
-  OPENROUTER_MODEL_CHAIN.map((model) => [
+const AI_MODEL_META = Object.fromEntries(
+  AI_MODEL_CHAIN.map((model) => [
     model.key,
     { label: model.label, chipLabel: model.label, dot: model.accent, id: model.id },
   ]),
@@ -156,9 +167,9 @@ const AI_STATUS_STYLE = {
   no_key: { label: "No key", color: "var(--app-text2)", bg: "var(--app-bg3)", border: "var(--app-bd)" },
 };
 
-function buildEmptyAIStatus(detail = "No OpenRouter key saved") {
+function buildEmptyAIStatus(detail = "No AI key saved") {
   return Object.fromEntries(
-    OPENROUTER_MODEL_ORDER.map((modelKey) => [
+    AI_MODEL_ORDER.map((modelKey) => [
       modelKey,
       { state: "no_key", detail },
     ]),
@@ -1385,10 +1396,11 @@ function buildSprintReferenceData(state, sprintNum) {
   };
 }
 
-function syncProviderStatus(prev, hasKey) {
-  if (!hasKey) return { state: "no_key", detail: "No OpenRouter key saved" };
+function syncProviderStatus(prev, model, keys) {
+  const hasKey = hasAIModelKey(model, keys);
+  if (!hasKey) return { state: "no_key", detail: `No ${model.label} key saved` };
   if (!prev || prev.state === "no_key") {
-    return { state: "ready", detail: "OpenRouter key saved and ready to use" };
+    return { state: "ready", detail: `${model.label} key saved and ready to use` };
   }
   return prev;
 }
@@ -4485,13 +4497,18 @@ export default function App() {
   }, [acknowledgeSharedState, applySharedSnapshot, showToast, updateSharedSyncStatus]);
 
   useEffect(() => {
+    const keys = {
+      geminiKey: state.geminiKey,
+      groqKey: state.groqKey,
+      openrouterKey: state.openrouterKey,
+    };
     setAIStatus((prev) => Object.fromEntries(
-      OPENROUTER_MODEL_ORDER.map((modelKey) => [
-        modelKey,
-        syncProviderStatus(prev[modelKey], !!state.openrouterKey),
+      AI_MODEL_CHAIN.map((model) => [
+        model.key,
+        syncProviderStatus(prev[model.key], model, keys),
       ]),
     ));
-  }, [state.openrouterKey]);
+  }, [state.geminiKey, state.groqKey, state.openrouterKey]);
 
   useEffect(() => {
     const handleStorage = (event) => {
@@ -4835,11 +4852,15 @@ export default function App() {
   }, [persist, showToast]);
 
   const runProviderTest = useCallback(async () => {
-    const openrouter = document.getElementById("openrouter-key")?.value.trim() || "";
-    if (!openrouter) {
+    const keys = {
+      geminiKey: document.getElementById("gemini-key")?.value.trim() || "",
+      groqKey: document.getElementById("groq-key")?.value.trim() || "",
+      openrouterKey: document.getElementById("openrouter-key")?.value.trim() || "",
+    };
+    if (!hasDashboardAIKey(keys)) {
       setProviderTestState({
         loading: false,
-        msg: "Add an OpenRouter API key before testing.",
+        msg: "Add a Gemini or Groq API key before testing.",
         err: true,
       });
       return;
@@ -4847,37 +4868,35 @@ export default function App() {
 
     setProviderTestState({
       loading: true,
-      msg: "Testing OpenRouter routes...",
+      msg: "Testing AI routes...",
       err: false,
     });
 
     try {
       const results = await testProviders(
-        {
-          openrouterKey: openrouter,
-        },
+        keys,
         (_, __, providers) => {
           if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
         },
       );
 
-      const parts = OPENROUTER_MODEL_ORDER.map((modelKey) => {
-        const meta = OPENROUTER_MODEL_META[modelKey];
+      const parts = AI_MODEL_ORDER.map((modelKey) => {
+        const meta = AI_MODEL_META[modelKey];
         const result = results[modelKey];
         if (!result?.configured) return `${meta.chipLabel} not configured`;
         if (result?.skipped) return `${meta.chipLabel} standby`;
         if (result.ok) return `${meta.chipLabel} OK`;
         return `${meta.chipLabel} failed: ${result?.error || "Unknown error"}`;
       });
-      const okModels = OPENROUTER_MODEL_ORDER.filter((modelKey) => results[modelKey]?.ok);
+      const okModels = AI_MODEL_ORDER.filter((modelKey) => results[modelKey]?.ok);
       const hasOperationalRoute = okModels.length > 0;
-      const hasHardError = OPENROUTER_MODEL_ORDER.some((modelKey) => {
+      const hasHardError = AI_MODEL_ORDER.some((modelKey) => {
         const result = results[modelKey];
         return result?.configured && !result?.ok && !result?.skipped;
       });
       const prefix = hasOperationalRoute
-        ? `OpenRouter ready via ${okModels.map((modelKey) => OPENROUTER_MODEL_META[modelKey].chipLabel).join(", ")}`
-        : "OpenRouter test failed";
+        ? `AI ready via ${okModels.map((modelKey) => AI_MODEL_META[modelKey].chipLabel).join(", ")}`
+        : "AI route test failed";
       const msg = `${prefix} · ${parts.join(" · ")}`;
       setProviderTestState({ loading: false, msg, err: !hasOperationalRoute && hasHardError });
       showToast(msg, !hasOperationalRoute && hasHardError);
@@ -4897,7 +4916,7 @@ export default function App() {
       return;
     }
     const directJsonSetup = tryParseProjectSetupPayload(setupPaste);
-    if (!directJsonSetup && !state.openrouterKey) {
+    if (!directJsonSetup && !hasDashboardAIKey(state)) {
       setModal("api");
       return;
     }
@@ -4908,9 +4927,9 @@ export default function App() {
       let resolvedModelKey = directJsonSetup ? "json" : "none";
       const onSetupStatus = (provider, msg, providers) => {
         if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-        if (OPENROUTER_MODEL_ORDER.includes(provider)) {
+        if (AI_MODEL_ORDER.includes(provider)) {
           resolvedModelKey = provider;
-          persistLocal({ apiProvider: "openrouter" });
+          persistLocal({ apiProvider: provider });
         }
         setSetupStatus(msg);
       };
@@ -4923,9 +4942,7 @@ export default function App() {
           parsed = await callAI(
             PROJECT_SETUP_SYSTEM_PROMPT,
             setupPaste,
-            {
-              openrouterKey: state.openrouterKey,
-            },
+            getDashboardAIKeys(state),
             onSetupStatus,
             {
               openrouterMaxTokens: 2600,
@@ -4937,9 +4954,7 @@ export default function App() {
             parsed = await callAI(
               PROJECT_SETUP_COMPACT_SYSTEM_PROMPT,
               setupPaste,
-              {
-                openrouterKey: state.openrouterKey,
-              },
+              getDashboardAIKeys(state),
               onSetupStatus,
               {
                 openrouterMaxTokens: 2200,
@@ -4998,8 +5013,8 @@ export default function App() {
       const providerLabel =
         resolvedModelKey === "json"
           ? "Project setup applied from JSON"
-        : OPENROUTER_MODEL_META[resolvedModelKey]
-          ? `Setup applied with ${OPENROUTER_MODEL_META[resolvedModelKey].label} via OpenRouter`
+        : AI_MODEL_META[resolvedModelKey]
+          ? `Setup applied with ${AI_MODEL_META[resolvedModelKey].label}`
             : "Project setup applied";
       const success = projectChanged
         ? `${providerLabel} · Switched to ${incomingProfile.projectKey || incomingProfile.projectName} · ${seededSummary}`
@@ -5172,54 +5187,44 @@ export default function App() {
       const text = tool === "rovo" ? rovoPaste : notesPaste;
       const setStatus = tool === "rovo" ? setRovoSt : setNotesSt;
       const setLoad = tool === "rovo" ? setRovoL : setNotesL;
-      const directJsonPayload = tool === "rovo" ? tryParseDirectMeetingPayload(text) : null;
+      const directJsonPayload = tryParseDirectMeetingPayload(text);
 
       if (!text.trim()) {
         setStatus("Paste content above first");
         return;
       }
-      if (!directJsonPayload && !state.openrouterKey) {
-        if (tool === "rovo") {
-          setStatus("Paste a valid Rovo JSON response or add an OpenRouter key for AI parsing.");
-        } else {
-          setStatus("Meeting-note parsing requires an OpenRouter key. Rovo board JSON updates still work without one.");
-        }
+      if (!directJsonPayload && !hasDashboardAIKey(state)) {
+        setStatus(getDashboardAIUnavailableMessage(tool));
         return;
       }
 
       setLoad(true);
-      setStatus(directJsonPayload ? "Valid Rovo JSON detected. Applying directly..." : "Processing...");
+      setStatus(directJsonPayload ? getDirectDashboardJsonStatus(tool) : "Processing...");
       try {
         let resolvedModelKey = "none";
-        const parsed = directJsonPayload || await (async () => {
-          const promptTemplate =
-            tool === "notes" && meeting.notesSystemPrompt
-              ? { ...meeting, systemPrompt: meeting.notesSystemPrompt }
-              : meeting;
-          const ctx = buildContext(promptTemplate, activeSprint, {
-            ...projectProfile,
-            epic: projectProfile.primaryEpic || projectContext.epic,
-            name: projectProfile.primaryEpicName || projectContext.epicName || projectProfile.projectName,
-            nextSprint,
-            recentSprintHistory: recentSprintHistoryForAI,
-            lastUpdated: state.lastUpdated,
-          });
-          return callAI(
-            ctx,
-            text,
-            {
-              openrouterKey: state.openrouterKey,
-            },
-            (provider, msg, providers) => {
-              if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
-              if (OPENROUTER_MODEL_ORDER.includes(provider)) {
-                resolvedModelKey = provider;
-                persistLocal({ apiProvider: "openrouter" });
-              }
-              setStatus(msg);
-            },
-          );
-        })();
+        const parsed = directJsonPayload || await parseDashboardCaptureWithAI({
+          tool,
+          meeting,
+          activeSprint,
+          projectProfile,
+          projectContext: {
+            epic: projectContext.epic,
+            epicName: projectContext.epicName,
+          },
+          nextSprint,
+          recentSprintHistory: recentSprintHistoryForAI,
+          lastUpdated: state.lastUpdated,
+          text,
+          keys: getDashboardAIKeys(state),
+          onStatusChange: (provider, msg, providers) => {
+            if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
+            if (AI_MODEL_ORDER.includes(provider)) {
+              resolvedModelKey = provider;
+              persistLocal({ apiProvider: provider });
+            }
+            setStatus(msg);
+          },
+        });
         const standupScopeGuard =
           tool === "rovo" && curMeeting === "standup"
             ? getStandupScopeGuardMessage(parsed, projectProfile, activeSprint?.num || state.activeSprint)
@@ -5233,14 +5238,14 @@ export default function App() {
         }
         const summary = applyParsed(
           parsed,
-          tool === "rovo" ? "Rovo/Jira" : "Meeting notes",
+          getDashboardCaptureSource(tool),
         );
         tool === "rovo" ? setRovoPaste("") : setNotes("");
         const providerLabel =
           directJsonPayload
-            ? "Dashboard updated from Rovo JSON"
-            : OPENROUTER_MODEL_META[resolvedModelKey]
-            ? `Updated with ${OPENROUTER_MODEL_META[resolvedModelKey].label} via OpenRouter`
+            ? getDirectDashboardJsonSuccessLabel(tool)
+            : AI_MODEL_META[resolvedModelKey]
+            ? `Updated with ${AI_MODEL_META[resolvedModelKey].label}`
             : "Dashboard updated";
         const successMessage = summary
           ? `${providerLabel} · ${summary}`
@@ -5270,27 +5275,27 @@ export default function App() {
   };
 
   const apiLabel = () => {
-    const activeModelKey = OPENROUTER_MODEL_ORDER.find((modelKey) => aiStatus[modelKey]?.state === "active");
-    if (activeModelKey) return `Powered by OpenRouter · ${OPENROUTER_MODEL_META[activeModelKey].label}`;
-    if (OPENROUTER_MODEL_ORDER.some((modelKey) => aiStatus[modelKey]?.state === "working")) {
-      return "Routing with OpenRouter";
+    const activeModelKey = AI_MODEL_ORDER.find((modelKey) => aiStatus[modelKey]?.state === "active");
+    if (activeModelKey) return `Powered by ${AI_MODEL_META[activeModelKey].label}`;
+    if (AI_MODEL_ORDER.some((modelKey) => aiStatus[modelKey]?.state === "working")) {
+      return "Routing AI request";
     }
-    if (OPENROUTER_MODEL_ORDER.every((modelKey) => ["failed", "rate_limited", "expired", "no_key"].includes(aiStatus[modelKey]?.state))) {
-      return "OpenRouter models exhausted";
+    if (AI_MODEL_ORDER.every((modelKey) => ["failed", "rate_limited", "expired", "no_key"].includes(aiStatus[modelKey]?.state))) {
+      return "AI routes unavailable";
     }
-    if (state.apiProvider === "openrouter" || state.openrouterKey) return "OpenRouter ready";
+    if (hasDashboardAIKey(state)) return "AI ready";
     return "No API key";
   };
   const apiDot = () => {
-    const activeModelKey = OPENROUTER_MODEL_ORDER.find((modelKey) => aiStatus[modelKey]?.state === "active");
-    if (activeModelKey) return OPENROUTER_MODEL_META[activeModelKey].dot;
-    if (OPENROUTER_MODEL_ORDER.some((modelKey) => aiStatus[modelKey]?.state === "working")) {
+    const activeModelKey = AI_MODEL_ORDER.find((modelKey) => aiStatus[modelKey]?.state === "active");
+    if (activeModelKey) return AI_MODEL_META[activeModelKey].dot;
+    if (AI_MODEL_ORDER.some((modelKey) => aiStatus[modelKey]?.state === "working")) {
       return "#fdba74";
     }
-    if (OPENROUTER_MODEL_ORDER.every((modelKey) => ["failed", "rate_limited", "expired", "no_key"].includes(aiStatus[modelKey]?.state))) {
+    if (AI_MODEL_ORDER.every((modelKey) => ["failed", "rate_limited", "expired", "no_key"].includes(aiStatus[modelKey]?.state))) {
       return "#f87171";
     }
-    if (state.apiProvider === "openrouter" || state.openrouterKey) return OPENROUTER_PROVIDER.accent;
+    if (hasDashboardAIKey(state)) return AI_ROUTER_PROVIDER.accent;
     return C.text2;
   };
 
@@ -5562,7 +5567,7 @@ export default function App() {
                     Connection Tip
                   </span>
                   <span style={{ fontSize: "12px", lineHeight: 1.5 }}>
-                    Open the app through `npm start` or the shared server URL. File-based launch will bypass the local proxy and OpenRouter requests will fail.
+                    Open the app through `npm start` or the shared server URL. File-based launch will bypass the local proxy and AI requests will fail.
                   </span>
                 </div>
                 <ShellButton
@@ -5773,10 +5778,10 @@ export default function App() {
                       />
                       {apiLabel()}
                     </div>
-                    {OPENROUTER_MODEL_ORDER.map((modelKey) => (
+                    {AI_MODEL_ORDER.map((modelKey) => (
                       <ProviderStatusChip
                         key={modelKey}
-                        name={OPENROUTER_MODEL_META[modelKey].chipLabel}
+                        name={AI_MODEL_META[modelKey].chipLabel}
                         info={aiStatus[modelKey]}
                       />
                     ))}
@@ -5963,10 +5968,26 @@ export default function App() {
           </div>
           {[
             [
+              "gemini-key",
+              "Google Gemini API key",
+              "AIza...",
+              "Primary AI route for setup parsing and Hedy / meeting-note parsing. Uses Gemini 2.5 Flash through the local sync server proxy.",
+              state.geminiKey || "",
+              "password",
+            ],
+            [
+              "groq-key",
+              "Groq API key",
+              "gsk_...",
+              "Fallback AI route. Uses Groq's OpenAI-compatible chat API with Llama 3.3 70B.",
+              state.groqKey || "",
+              "password",
+            ],
+            [
               "openrouter-key",
-              "OpenRouter API key",
+              "OpenRouter API key (optional fallback)",
               "sk-or-...",
-              "All completions use OpenRouter. The route is fixed to Gemma 4, then Llama 3.3 70B, then Qwen 3 Coder, then the Free Router. On 429 the app waits 10 seconds before rotating. Get a key from openrouter.ai/keys.",
+              "Optional legacy fallback only. Leave blank if you want Gemini and Groq to be the only AI routes.",
               state.openrouterKey || "",
               "password",
             ],
@@ -6045,19 +6066,23 @@ export default function App() {
                 fontWeight: "600",
               }}
               onClick={() => {
-                const or = document.getElementById("openrouter-key").value.trim();
+                const keys = {
+                  geminiKey: document.getElementById("gemini-key").value.trim(),
+                  groqKey: document.getElementById("groq-key").value.trim(),
+                  openrouterKey: document.getElementById("openrouter-key").value.trim(),
+                };
                 const jira = document.getElementById("jira-base").value.trim().replace(/\/$/, "");
                 setProviderTestState({ loading: false, msg: "", err: false });
                 setAIStatus(Object.fromEntries(
-                  OPENROUTER_MODEL_ORDER.map((modelKey) => [modelKey, syncProviderStatus(null, !!or)]),
+                  AI_MODEL_CHAIN.map((model) => [model.key, syncProviderStatus(null, model, keys)]),
                 ));
                 persistLocal({
-                  openrouterKey: or,
+                  ...keys,
                   jiraBase: jira,
-                  apiProvider: or ? "openrouter" : "none",
+                  apiProvider: getPreferredAIProvider(keys),
                 });
                 setModal(null);
-                setRovoSt("Keys saved — ready");
+                setRovoSt("Keys saved — AI ready");
               }}
             >
               Save keys
@@ -6076,7 +6101,7 @@ export default function App() {
               disabled={providerTestState.loading}
               onClick={runProviderTest}
             >
-              {providerTestState.loading ? "Testing..." : "Test OpenRouter"}
+              {providerTestState.loading ? "Testing..." : "Test AI routes"}
             </button>
             <button
               style={{

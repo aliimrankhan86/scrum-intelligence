@@ -1,27 +1,35 @@
-// ─── AI Routing: OpenRouter free-tier model chain ────────────────────────────
+// ─── AI Routing: Gemini primary, Groq fallback, optional OpenRouter fallback ──
 
 import {
-  OPENROUTER_MODEL_CHAIN,
+  AI_MODEL_CHAIN,
+  getConfiguredAIModels,
+  hasAIModelKey,
 } from './aiProviders';
 
-const OPENROUTER_MAX_COMPLETION_TOKENS = 2200;
-const OPENROUTER_RATE_LIMIT_BACKOFF_MS = 10000;
+const AI_MAX_COMPLETION_TOKENS = 2200;
+const AI_RATE_LIMIT_BACKOFF_MS = 10000;
 const configuredOrigin = (process.env.REACT_APP_SYNC_SERVER_ORIGIN || '').trim().replace(/\/+$/, '');
+export const GEMINI_PROXY_ENDPOINT = configuredOrigin
+  ? `${configuredOrigin}/api/gemini/generate`
+  : '/api/gemini/generate';
+export const GROQ_PROXY_ENDPOINT = configuredOrigin
+  ? `${configuredOrigin}/api/groq/chat`
+  : '/api/groq/chat';
 export const OPENROUTER_PROXY_ENDPOINT = configuredOrigin
   ? `${configuredOrigin}/api/openrouter/chat`
   : '/api/openrouter/chat';
 
-function noKeyStatus() {
-  return { state: 'no_key', detail: 'No OpenRouter key saved' };
+function noKeyStatus(model) {
+  return { state: 'no_key', detail: `No ${model.label} key saved` };
 }
 
-function buildModelStates(hasKey) {
+function buildModelStates(keys) {
   return Object.fromEntries(
-    OPENROUTER_MODEL_CHAIN.map((model) => [
+    AI_MODEL_CHAIN.map((model) => [
       model.key,
-      hasKey
-        ? { state: 'ready', detail: `${model.label} ready through OpenRouter` }
-        : noKeyStatus(),
+      hasAIModelKey(model, keys)
+        ? { state: 'ready', detail: `${model.label} key saved and ready` }
+        : noKeyStatus(model),
     ]),
   );
 }
@@ -34,7 +42,7 @@ function emitModelStates(onStatusChange, currentStates, provider, msg, patch = {
 
 function modelStatePatch(activeKey, activeState, otherStateBuilder) {
   return Object.fromEntries(
-    OPENROUTER_MODEL_CHAIN.map((model) => [
+    AI_MODEL_CHAIN.map((model) => [
       model.key,
       model.key === activeKey
         ? activeState
@@ -43,13 +51,9 @@ function modelStatePatch(activeKey, activeState, otherStateBuilder) {
   );
 }
 
-function isRetryableOpenRouterFailure(error) {
+function isRetryableAIModelFailure(error) {
   const status = Number(error?.status);
-  return status === 429 || status === 404;
-}
-
-function buildSkippedTestResult(reason) {
-  return { ok: false, configured: true, skipped: true, detail: reason };
+  return status === 429 || status === 404 || status >= 500;
 }
 
 function wait(ms) {
@@ -59,48 +63,48 @@ function wait(ms) {
 }
 
 export async function callAI(systemPrompt, userContent, keys, onStatusChange, options = {}) {
-  const { openrouterKey } = keys || {};
   const maxCompletionTokens = Number.isFinite(Number(options?.openrouterMaxTokens))
     ? Number(options.openrouterMaxTokens)
     : Number.isFinite(Number(options?.maxCompletionTokens))
       ? Number(options.maxCompletionTokens)
-      : OPENROUTER_MAX_COMPLETION_TOKENS;
+      : AI_MAX_COMPLETION_TOKENS;
   const rateLimitBackoffMs = Number.isFinite(Number(options?.rateLimitBackoffMs))
     ? Number(options.rateLimitBackoffMs)
-    : OPENROUTER_RATE_LIMIT_BACKOFF_MS;
+    : AI_RATE_LIMIT_BACKOFF_MS;
   const sleep = typeof options?.sleep === 'function' ? options.sleep : wait;
+  const configuredModels = getConfiguredAIModels(keys);
 
-  if (!openrouterKey) {
-    throw new Error('No OpenRouter API key configured — click ⚙ API keys');
+  if (!configuredModels.length) {
+    throw new Error('No Gemini or Groq API key configured — click ⚙ API keys');
   }
 
   const errors = [];
-  let modelStates = buildModelStates(true);
+  let modelStates = buildModelStates(keys);
 
-  for (let index = 0; index < OPENROUTER_MODEL_CHAIN.length; index += 1) {
-    const model = OPENROUTER_MODEL_CHAIN[index];
-    const nextModel = OPENROUTER_MODEL_CHAIN[index + 1] || null;
+  for (let index = 0; index < configuredModels.length; index += 1) {
+    const model = configuredModels[index];
+    const nextModel = configuredModels[index + 1] || null;
 
     modelStates = emitModelStates(
       onStatusChange,
       modelStates,
       index === 0 ? 'processing' : 'fallback',
       index === 0
-        ? `Contacting ${model.label} via OpenRouter...`
-        : `Retrying with ${model.label} via OpenRouter...`,
+        ? `Contacting ${model.label}...`
+        : `Retrying with ${model.label}...`,
       modelStatePatch(
         model.key,
         { state: 'working', detail: `Sending request to ${model.id}` },
         () => nextModel
           ? { state: 'standby', detail: `Waiting in case ${model.label} fails` }
-          : { state: 'standby', detail: 'Waiting for the active OpenRouter route' },
+          : { state: 'standby', detail: 'Waiting for the active AI route' },
       ),
     );
 
     try {
-      const raw = await requestOpenRouterChat({
-        openrouterKey,
-        modelId: model.id,
+      const raw = await requestAIModel({
+        keys,
+        model,
         systemPrompt,
         userContent,
         maxCompletionTokens,
@@ -111,7 +115,7 @@ export async function callAI(systemPrompt, userContent, keys, onStatusChange, op
         onStatusChange,
         modelStates,
         model.key,
-        `Powered by OpenRouter · ${model.label}`,
+        `Powered by ${model.label}`,
         modelStatePatch(
           model.key,
           { state: 'active', detail: `Response received from ${model.id}` },
@@ -121,7 +125,7 @@ export async function callAI(systemPrompt, userContent, keys, onStatusChange, op
       return parsed;
     } catch (error) {
       errors.push(`${model.label} unavailable: ${error.message}`);
-      const retryable = isRetryableOpenRouterFailure(error) && nextModel;
+      const retryable = isRetryableAIModelFailure(error) && nextModel;
       const state = error.status === 429 ? 'rate_limited' : error.status === 404 ? 'expired' : 'failed';
 
       if (retryable) {
@@ -157,7 +161,7 @@ export async function callAI(systemPrompt, userContent, keys, onStatusChange, op
         onStatusChange,
         modelStates,
         'error',
-        'OpenRouter model chain exhausted',
+        'AI model chain exhausted',
         {
           [model.key]: { state, detail: error.message },
         },
@@ -170,59 +174,36 @@ export async function callAI(systemPrompt, userContent, keys, onStatusChange, op
 }
 
 export async function testProviders(keys, onStatusChange) {
-  const { openrouterKey } = keys || {};
   const results = Object.fromEntries(
-    OPENROUTER_MODEL_CHAIN.map((model) => [
+    AI_MODEL_CHAIN.map((model) => [
       model.key,
-      { ok: false, configured: true, skipped: false, error: '' },
+      { ok: false, configured: hasAIModelKey(model, keys), skipped: false, error: '' },
     ]),
   );
 
-  if (!openrouterKey) {
-    return Object.fromEntries(
-      OPENROUTER_MODEL_CHAIN.map((model) => [
-        model.key,
-        { ok: false, configured: false, error: 'No OpenRouter key saved' },
-      ]),
-    );
+  const configuredModels = getConfiguredAIModels(keys);
+  if (!configuredModels.length) {
+    return results;
   }
 
-  let modelStates = buildModelStates(true);
+  let modelStates = buildModelStates(keys);
   const testSystem = 'Return only compact JSON.';
   const testUser = '{"ok":true}';
-  const primaryModel = OPENROUTER_MODEL_CHAIN[0];
-  const safetyModel = OPENROUTER_MODEL_CHAIN[OPENROUTER_MODEL_CHAIN.length - 1];
-  const intermediateModels = OPENROUTER_MODEL_CHAIN.slice(1, -1);
-
-  const markSkipped = (models, reason) => {
-    models.forEach((model) => {
-      results[model.key] = buildSkippedTestResult(reason);
-      modelStates = emitModelStates(
-        onStatusChange,
-        modelStates,
-        model.key,
-        `${model.label} not probed during smoke test`,
-        {
-          [model.key]: { state: 'standby', detail: reason },
-        },
-      );
-    });
-  };
 
   const runSingleRouteTest = async (model) => {
     modelStates = emitModelStates(
       onStatusChange,
       modelStates,
       'processing',
-      `Testing ${model.label} via OpenRouter...`,
+      `Testing ${model.label}...`,
       {
         [model.key]: { state: 'working', detail: `Testing ${model.id}` },
       },
     );
 
-    const raw = await requestOpenRouterChat({
-      openrouterKey,
-      modelId: model.id,
+    const raw = await requestAIModel({
+      keys,
+      model,
       systemPrompt: testSystem,
       userContent: testUser,
       maxCompletionTokens: 80,
@@ -240,72 +221,156 @@ export async function testProviders(keys, onStatusChange) {
     );
   };
 
-  try {
-    await runSingleRouteTest(primaryModel);
-    markSkipped(
-      OPENROUTER_MODEL_CHAIN.filter((model) => model.key !== primaryModel.key),
-      'Smoke test passed on the primary route. Fallback routes will be checked only if the app needs them.',
-    );
-    return results;
-  } catch (error) {
-    results[primaryModel.key] = { ok: false, configured: true, skipped: false, error: error.message };
-    modelStates = emitModelStates(
-      onStatusChange,
-      modelStates,
-      primaryModel.key,
-      `${primaryModel.label} test failed`,
-      {
-        [primaryModel.key]: {
-          state: error.status === 429 ? 'rate_limited' : error.status === 404 ? 'expired' : 'failed',
-          detail: error.message,
-        },
-      },
-    );
-
-    const retryable = isRetryableOpenRouterFailure(error) && safetyModel && safetyModel.key !== primaryModel.key;
-    if (!retryable) {
-      markSkipped(
-        OPENROUTER_MODEL_CHAIN.filter((model) => model.key !== primaryModel.key),
-        'Smoke test stopped after a non-retryable primary-route failure.',
-      );
-      return results;
-    }
-
-    markSkipped(intermediateModels, 'Skipped in smoke test. These routes are used on demand during live retries.');
-
+  for (const model of configuredModels) {
     try {
-      await runSingleRouteTest(safetyModel);
-    } catch (safetyError) {
-      results[safetyModel.key] = { ok: false, configured: true, skipped: false, error: safetyError.message };
+      await runSingleRouteTest(model);
+    } catch (error) {
+      results[model.key] = { ok: false, configured: true, skipped: false, error: error.message };
       modelStates = emitModelStates(
         onStatusChange,
         modelStates,
-        safetyModel.key,
-        `${safetyModel.label} test failed`,
+        model.key,
+        `${model.label} test failed`,
         {
-          [safetyModel.key]: {
-            state: safetyError.status === 429 ? 'rate_limited' : safetyError.status === 404 ? 'expired' : 'failed',
-            detail: safetyError.message,
+          [model.key]: {
+            state: error.status === 429 ? 'rate_limited' : error.status === 404 ? 'expired' : 'failed',
+            detail: error.message,
           },
         },
       );
     }
-
-    return results;
   }
+
+  return results;
 }
 
-async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
+async function requestAIModel({ keys, model, systemPrompt, userContent, maxCompletionTokens }) {
+  if (model.provider === 'gemini') {
+    return requestGeminiGenerate({
+      geminiKey: keys.geminiKey,
+      modelId: model.id,
+      systemPrompt,
+      userContent,
+      maxCompletionTokens,
+    });
+  }
+
+  if (model.provider === 'groq') {
+    return requestGroqChat({
+      groqKey: keys.groqKey,
+      modelId: model.id,
+      systemPrompt,
+      userContent,
+      maxCompletionTokens,
+    });
+  }
+
+  return requestOpenRouterChat({
+    openrouterKey: keys.openrouterKey,
+    modelId: model.id,
+    systemPrompt,
+    userContent,
+    maxCompletionTokens,
+  });
+}
+
+async function requestGeminiGenerate({ geminiKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
   let res;
   try {
-    res = await fetch(OPENROUTER_PROXY_ENDPOINT, {
+    res = await fetch(GEMINI_PROXY_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        openrouterKey,
+        geminiKey,
+        model: modelId,
+        systemPrompt,
+        userContent,
+        temperature: 0.1,
+        maxOutputTokens: maxCompletionTokens,
+        responseMimeType: 'application/json',
+      }),
+    });
+  } catch (_) {
+    const requestError = new Error('The local Gemini proxy did not respond. Ensure the shared server is running and reachable.');
+    requestError.status = 0;
+    throw requestError;
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = err?.error?.message || err?.message || res.statusText;
+    const requestError = new Error(`Gemini ${res.status}: ${detail}`);
+    requestError.status = res.status;
+    throw requestError;
+  }
+
+  const data = await res.json();
+  const candidate = data.candidates?.[0] || {};
+  const finishReason = candidate.finishReason || data.finishReason || '';
+  const content = (candidate.content?.parts || [])
+    .map((part) => part?.text || '')
+    .join('')
+    .trim();
+  if (finishReason === 'MAX_TOKENS') {
+    const requestError = new Error(`Gemini responded, but the JSON was truncated for ${modelId} (finishReason=MAX_TOKENS).`);
+    requestError.status = 200;
+    throw requestError;
+  }
+  return content;
+}
+
+async function requestGroqChat({ groqKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
+  return requestOpenAICompatibleChat({
+    endpoint: GROQ_PROXY_ENDPOINT,
+    providerLabel: 'Groq',
+    apiKeyField: 'groqKey',
+    apiKey: groqKey,
+    modelId,
+    systemPrompt,
+    userContent,
+    maxCompletionTokens,
+    includeResponseFormat: false,
+  });
+}
+
+async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
+  return requestOpenAICompatibleChat({
+    endpoint: OPENROUTER_PROXY_ENDPOINT,
+    providerLabel: 'OpenRouter',
+    apiKeyField: 'openrouterKey',
+    apiKey: openrouterKey,
+    modelId,
+    systemPrompt,
+    userContent,
+    maxCompletionTokens,
+    includeResponseFormat: true,
+  });
+}
+
+async function requestOpenAICompatibleChat({
+  endpoint,
+  providerLabel,
+  apiKeyField,
+  apiKey,
+  modelId,
+  systemPrompt,
+  userContent,
+  maxCompletionTokens,
+  includeResponseFormat,
+}) {
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        [apiKeyField]: apiKey,
         model: modelId,
         messages: [
           { role: 'system', content: systemPrompt },
@@ -313,11 +378,11 @@ async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, use
         ],
         temperature: 0.1,
         max_completion_tokens: maxCompletionTokens,
-        response_format: { type: 'json_object' },
+        ...(includeResponseFormat ? { response_format: { type: 'json_object' } } : {}),
       }),
     });
   } catch (_) {
-    const requestError = new Error('The local OpenRouter proxy did not respond. Ensure the shared server is running and reachable.');
+    const requestError = new Error(`The local ${providerLabel} proxy did not respond. Ensure the shared server is running and reachable.`);
     requestError.status = 0;
     throw requestError;
   }
@@ -329,7 +394,7 @@ async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, use
       err?.message ||
       (Array.isArray(err?.errors) ? err.errors.join(', ') : '') ||
       res.statusText;
-    const requestError = new Error(`OpenRouter ${res.status}: ${detail}`);
+    const requestError = new Error(`${providerLabel} ${res.status}: ${detail}`);
     requestError.status = res.status;
     throw requestError;
   }
@@ -338,7 +403,7 @@ async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, use
   const finishReason = data.choices?.[0]?.finish_reason || data.finish_reason || '';
   const content = data.choices?.[0]?.message?.content || '';
   if (finishReason === 'length') {
-    const requestError = new Error(`OpenRouter responded, but the JSON was truncated for ${modelId} (finish_reason=length).`);
+    const requestError = new Error(`${providerLabel} responded, but the JSON was truncated for ${modelId} (finish_reason=length).`);
     requestError.status = 200;
     throw requestError;
   }

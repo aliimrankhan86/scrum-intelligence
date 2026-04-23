@@ -28,16 +28,19 @@ UNION ALL SELECT 'Tested functions', COUNT(DISTINCT source) FROM edges WHERE kin
 - State in `localStorage`
 - Current store key: `scrum_intelligence_v8`
 - Legacy migration: `rpab_v8` → `scrum_intelligence_v8`
-- AI routing: OpenRouter only with Gemma 4 → Llama 3.3 70B → Qwen 3 Coder → Free Router fallback order
+- AI routing: Gemini 2.5 Flash first, Groq Llama 3.3 70B second, optional OpenRouter Free Router only when a fallback key is saved
 
 ## Current Operating Mode
 
-- Assume OpenRouter may be unavailable for day-to-day use
-- Do not remove the OpenRouter capability; keep it intact for later reactivation
+- Assume direct Rovo JSON is the most reliable day-to-day update path
+- Gemini and Groq are the active LLM providers for setup cleanup and Hedy / meeting-note parsing
+- Do not remove the optional OpenRouter capability unless explicitly requested; it remains a dormant fallback path
 - Keep provider routing/test logic intact, but keep provider/model badges hidden from the main dashboard UI unless explicitly re-enabled
 - Prefer direct JSON from Jira Rovo for `Project setup`, `Daily standup`, `Refinement`, `Sprint planning`, `Sprint review`, `Retrospective`, and `Velocity & insights`
 - These Rovo JSON flows should work without any LLM key when the pasted response already matches the dashboard JSON shape
 - Meeting-transcript parsing remains an optional LLM-assisted path and may be dormant until an API key is restored
+- Hedy AI notes are treated as meeting-note context. Dashboard-ready Hedy JSON can apply without an LLM key; free-form Hedy notes require the optional LLM-assisted path.
+- Keep capture AI enablement isolated in `src/aiDashboardAdapter.js`. If AI parsing needs to be removed, remove that adapter bridge rather than refactoring dashboard state or UI.
 - Treat dashboard sprint labels as hints only. Rovo prompts must verify the live Jira sprint number, name, and dates before returning JSON.
 
 ## Architecture Rules
@@ -48,6 +51,9 @@ UNION ALL SELECT 'Tested functions', COUNT(DISTINCT source) FROM edges WHERE kin
 - If a setup payload marks one sprint row as `active: true` but the top-level `activeSprint` number disagrees, prefer the flagged sprint row and keep history numbering aligned to Jira
 - When a sprint is archived, persist explicit sprint identity inside the archive snapshot: sprint number, sprint name, and sprint dates
 - All AI calls go through `src/api.js`
+- `src/aiDashboardAdapter.js` is a thin wrapper around `src/api.js` for capture parsing only
+- Provider metadata and route order live in `src/aiProviders.js`
+- The local sync server proxies AI calls through `/api/gemini/generate`, `/api/groq/chat`, and optional `/api/openrouter/chat`
 - Prompt contracts live in `src/config.js`
 - Do not hardcode project-specific values when runtime profile data already exists
 - Do not change `Clear data` to wipe keys, theme, or Jira base URL
@@ -66,10 +72,13 @@ UNION ALL SELECT 'Tested functions', COUNT(DISTINCT source) FROM edges WHERE kin
 1. `src/projectProfile.js`
 2. `src/store.js`
 3. `src/config.js`
-4. `src/api.js`
-5. `src/App.js`
-6. `src/Insights.js`
-7. `src/App.test.js`
+4. `src/aiProviders.js`
+5. `src/api.js`
+6. `src/aiDashboardAdapter.js`
+7. `src/App.js`
+8. `src/Insights.js`
+9. `server.js`
+10. `src/App.test.js`
 
 ## Validation Gates
 

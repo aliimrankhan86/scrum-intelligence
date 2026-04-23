@@ -11,10 +11,11 @@ Meeting-note input is flexible by design. It works with Hedy, Apple Notes, Teams
 
 Current operating mode:
 - Rovo JSON is the primary path for `Project setup`, `Daily standup`, `Refinement`, `Sprint planning`, `Sprint review`, `Retrospective`, and `Velocity & insights`
-- OpenRouter support is kept in the app, but it may be unavailable at times
-- Provider/model badges are intentionally hidden from the main dashboard UI for now, but the OpenRouter routing and test flow remain available in `API keys`
-- If OpenRouter is unavailable, direct Rovo JSON still works for board, planning, review, and sprint updates
-- Meeting-note parsing remains optional and depends on OpenRouter being available
+- Gemini is the primary AI parser and Groq is the fallback parser
+- OpenRouter is kept only as an optional legacy fallback; leave it blank if Gemini and Groq are enough
+- Provider/model badges are intentionally hidden from the main dashboard UI for now, but the AI route test flow remains available in `API keys`
+- If no LLM key is available, direct Rovo JSON still works for board, planning, review, and sprint updates
+- Meeting-note parsing remains optional and depends on a Gemini, Groq, or optional OpenRouter key being available
 
 ## Who It Is For
 
@@ -28,7 +29,7 @@ Current operating mode:
 - Project-adaptive, not permanently tied to one programme
 - Shared-dashboard first, so every connected instance sees the same latest state
 - Ceremony-specific inputs with one cross-sprint reference view
-- User-supplied OpenRouter key only, with a fixed free-tier retry chain
+- User-supplied AI keys only, with Gemini first and Groq as the normal fallback
 - Reusable for other teams, as long as they can provide Jira / Rovo setup data and meeting notes
 
 ## Functionality
@@ -49,21 +50,20 @@ Current operating mode:
 3. Copy the setup prompt.
 4. Run it in Rovo.
 5. Paste the response once and apply setup.
-6. Add your OpenRouter key in `API keys`.
+6. Add your Gemini and/or Groq key in `API keys`.
 7. Open `Daily standup` and use the Rovo prompt plus meeting notes input to keep the dashboard current.
 
 If the pasted setup response is already valid JSON in the expected schema, the app applies it directly without sending it through an LLM again. The AI parsing fallback is used only when the pasted setup response needs cleanup or conversion.
 The same direct-JSON rule now applies to Rovo updates in `Daily standup`, `Refinement`, `Sprint planning`, `Sprint review`, `Retrospective`, and `Velocity & insights`.
 
-OpenRouter model order:
-- `google/gemma-4-31b-it:free` first
-- `meta-llama/llama-3.3-70b-instruct:free` on `429` or `404`
-- `qwen/qwen3-coder:free` as the emergency fallback on `429` or `404`
-- `openrouter/free` as the safety router after that
+AI model order:
+- `gemini-2.5-flash` first through the Gemini API
+- `llama-3.3-70b-versatile` second through Groq
+- `openrouter/free` only if an optional OpenRouter key is saved
 
 Rate-limit rule:
 - On `429`, the app waits 10 seconds before rotating to the next route.
-- `Test OpenRouter` is a smoke test. It confirms the app is operational without probing every fallback route on every click.
+- `Test AI routes` checks each configured route with a small JSON request.
 
 The setup prompt is designed to gather:
 - project profile and workstreams / epics
@@ -85,7 +85,7 @@ npm start
 ```
 
 `npm start` now starts both the React app and the shared SQLite sync server together.
-That same server also proxies OpenRouter requests, so AI connectivity depends on it as well as shared sync.
+That same server also proxies Gemini, Groq, and optional OpenRouter requests, so AI connectivity depends on it as well as shared sync.
 
 If you already have a shared sync server running and only want the frontend:
 
@@ -100,13 +100,13 @@ Any instance connected to the same sync server will pull the latest saved dashbo
 
 How the shared-state model works:
 - The shared SQLite store is the source of truth for project, sprint, meeting, and dashboard data.
-- Browser local storage keeps local-only settings such as theme, the OpenRouter API key, Jira base URL, and a local backup of the last saved dashboard state.
+- Browser local storage keeps local-only settings such as theme, AI API keys, Jira base URL, and a local backup of the last saved dashboard state.
 - On startup, the app connects to the shared store and loads the latest shared snapshot.
 - If the shared store is empty, the newest surviving local dashboard backup seeds the shared store automatically.
 - If the shared store already has data but a local backup is newer, the newer local backup is restored into the shared store automatically.
 - Older stale snapshots are rejected by the server, so an old instance cannot overwrite newer data.
 - If the shared store is unavailable, the app becomes read-only instead of silently drifting into a separate local copy.
-- OpenRouter requests are sent through this server at `/api/openrouter/chat`, so browser CORS does not need to be bypassed manually.
+- AI requests are sent through this server at `/api/gemini/generate`, `/api/groq/chat`, or `/api/openrouter/chat`, so browser CORS does not need to be bypassed manually.
 
 You can still run the sync server by itself:
 
@@ -134,7 +134,7 @@ Recommended sequence:
 1. Before the meeting, open `Daily standup` and copy the Jira / Rovo prompt.
 2. Run that prompt in Rovo so the dashboard gets the live board truth for the current sprint.
 3. Paste the Rovo JSON result into the left capture panel and update the dashboard.
-4. After the meeting, if OpenRouter is available, paste the meeting transcript or notes into the right capture panel and update the dashboard again.
+4. After the meeting, if Gemini or Groq is configured, paste the Hedy transcript or notes into the right capture panel and update the dashboard again.
 
 The standup prompts and AI context are designed to include:
 - current sprint and next sprint context
@@ -150,7 +150,23 @@ Standup rules:
 - The standup prompt is intentionally strict so the dashboard stays quantitative and useful for day-to-day Scrum leadership.
 - The copied standup prompt treats the dashboard sprint as a hint only and requires Rovo to verify the live open Jira sprint number, name, and dates before answering.
 - If a pasted standup payload is for a different sprint number than the dashboard's active sprint, the app rejects it instead of updating the board with stale sprint data.
-- If OpenRouter is unavailable, the Rovo board update still works; only transcript parsing is paused.
+- If no AI key is available, the Rovo board update still works; only free-form transcript parsing is paused.
+
+## AI Enablement
+
+AI parsing is intentionally isolated behind `src/aiDashboardAdapter.js`.
+The adapter handles capture source labels, no-key messaging, Hedy / meeting-note context, and the small bridge into `src/api.js`.
+
+Removal boundary:
+- Keep direct Rovo JSON capture in `App.js`; that path does not require an LLM key.
+- Remove or bypass `src/aiDashboardAdapter.js` only if transcript / Hedy parsing is not wanted.
+- Do not refactor dashboard state, routing, layout, sync, or prompt contracts just to change AI providers.
+
+Hedy usage:
+- Paste Hedy notes, Teams transcripts, AI summaries, or manual notes into the meeting-notes capture panel.
+- When Gemini or Groq is available, the app parses that context into dashboard actions, risks, questions, decisions, and next steps.
+- If Hedy returns dashboard-ready JSON, paste it into the meeting-notes capture panel and it can update without an LLM key.
+- When no AI key is available and Hedy output is free-form notes, paste Rovo JSON for board truth and keep Hedy notes as source material until AI parsing is restored.
 
 Other ceremony prompts:
 - `Refinement` now asks Rovo for target-sprint JSON covering carry-forward work, candidate backlog, dependency gates, team load, recommendations, actions, and decisions.
@@ -188,8 +204,8 @@ npm run build
 
 - No API keys are committed to this repository.
 - Keys are entered by the user in the app UI and stored only in that browser's local storage.
-- All completions run through OpenRouter only, using the fixed Gemma 4 → Llama 3.3 70B → Qwen 3 Coder → Free Router retry order.
-- The browser sends the saved key only to the local/shared server proxy, which then calls OpenRouter.
+- Completions run through Gemini first, Groq second, and optional OpenRouter only if a fallback key is saved.
+- The browser sends saved keys only to the local/shared server proxy, which then calls the selected provider.
 - If someone downloads this repository, they must use their own keys.
 - This is safe for local/private use and repo sharing.
 - For public multi-user deployment, use a backend or proxy if keys must remain secret from end users.
@@ -215,5 +231,6 @@ That avoids introducing data-leakage, connector-governance, or access-control co
 
 ## AI Assistant Context
 
-- `CLAUDE.md` is included as an optional repo-local handoff file for coding assistants.
-- It does not affect runtime behavior.
+- `AGENTS.md` and `CLAUDE.md` are repo-local handoff files for coding assistants.
+- They document the current Gemini → Groq → optional OpenRouter AI routing, Rovo-first data flow, Hedy notes handling, and the removable `src/aiDashboardAdapter.js` boundary.
+- They do not affect runtime behavior.

@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { INSIGHTS_CONFIG } from './config';
 import { callAI } from './api';
-import { OPENROUTER_MODEL_CHAIN } from './aiProviders';
+import { AI_MODEL_CHAIN } from './aiProviders';
+import {
+  getDashboardAIKeys,
+  hasDashboardAIKey,
+} from './aiDashboardAdapter';
 import {
   DEFAULT_PROJECT_PROFILE,
   deriveProjectContextFromProfile,
@@ -19,8 +23,8 @@ const C = {
   red:'var(--app-red)', redBg:'var(--app-red-bg)',
 };
 
-const OPENROUTER_MODEL_META = Object.fromEntries(
-  OPENROUTER_MODEL_CHAIN.map((model) => [model.key, model]),
+const AI_MODEL_META = Object.fromEntries(
+  AI_MODEL_CHAIN.map((model) => [model.key, model]),
 );
 
 function textValue(value) {
@@ -213,19 +217,17 @@ export default function Insights({ state, persist, onAIStatusChange }) {
   const process = async () => {
     if (!paste.trim()) { setStatus('Paste Rovo response above first'); return; }
     const directJsonPayload = tryParseDirectInsightsPayload(paste);
-    if (!directJsonPayload && !state.openrouterKey) { setStatus('Paste a valid Rovo JSON response or add an OpenRouter key for AI parsing.'); return; }
+    if (!directJsonPayload && !hasDashboardAIKey(state)) { setStatus('Paste a valid Rovo JSON response or add a Gemini/Groq API key for AI parsing.'); return; }
     setLoading(true);
     setStatus(directJsonPayload ? 'Valid Rovo JSON detected. Applying directly...' : 'Processing...');
     try {
       let resolvedModelKey = 'none';
       const parsed = directJsonPayload || await callAI(
         INSIGHTS_CONFIG.systemPrompt, paste,
-        {
-          openrouterKey: state.openrouterKey,
-        },
+        getDashboardAIKeys(state),
         (provider, msg, providerStates) => {
           onAIStatusChange?.(providerStates);
-          if (OPENROUTER_MODEL_META[provider]) {
+          if (AI_MODEL_META[provider]) {
             resolvedModelKey = provider;
           }
           setStatus(msg);
@@ -253,8 +255,8 @@ export default function Insights({ state, persist, onAIStatusChange }) {
       setPaste('');
       const providerLabel = directJsonPayload
         ? 'Velocity updated from Rovo JSON'
-        : OPENROUTER_MODEL_META[resolvedModelKey]
-        ? `Updated with ${OPENROUTER_MODEL_META[resolvedModelKey].label} via OpenRouter`
+        : AI_MODEL_META[resolvedModelKey]
+        ? `Updated with ${AI_MODEL_META[resolvedModelKey].label}`
         : 'Velocity updated';
       setStatus(parsed.summary ? `${providerLabel} · ${parsed.summary}` : providerLabel);
     } catch(e) {

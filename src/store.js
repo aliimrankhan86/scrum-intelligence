@@ -593,9 +593,17 @@ export function hydrateState(rawState, defaultSprints) {
       ...defaultProjectContext,
       ...(rawState.projectContext || {}),
     },
+    geminiKey: rawState.geminiKey || '',
+    groqKey: rawState.groqKey || '',
     openrouterKey: rawState.openrouterKey || '',
     jiraBase: rawState.jiraBase || '',
-    apiProvider: rawState.openrouterKey || rawState.apiProvider === 'openrouter' ? 'openrouter' : 'none',
+    apiProvider: rawState.geminiKey
+      ? 'gemini'
+      : rawState.groqKey
+        ? 'groq'
+        : rawState.openrouterKey || rawState.apiProvider === 'openrouter'
+          ? 'openrouter'
+          : 'none',
     connectionTipDismissed: Boolean(rawState.connectionTipDismissed),
     projectSetupAppliedAt: rawState.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(rawState.projectSetupNotes) ? rawState.projectSetupNotes : base.projectSetupNotes,
@@ -612,6 +620,8 @@ export function extractLocalSettings(rawState, defaultSprints) {
   const state = hydrateState(rawState, defaultSprints);
   return {
     theme: state.theme,
+    geminiKey: state.geminiKey,
+    groqKey: state.groqKey,
     openrouterKey: state.openrouterKey,
     jiraBase: state.jiraBase,
     apiProvider: state.apiProvider,
@@ -623,6 +633,8 @@ export function extractSharedDashboardState(rawState, defaultSprints) {
   const state = hydrateState(rawState, defaultSprints);
   const {
     theme,
+    geminiKey,
+    groqKey,
     openrouterKey,
     jiraBase,
     apiProvider,
@@ -750,6 +762,8 @@ export function defaultState(defaultSprints) {
     theme: 'light',
     projectProfile,
     projectContext,
+    geminiKey: '',
+    groqKey: '',
     openrouterKey: '',
     jiraBase: '',         // e.g. https://yourorg.atlassian.net/browse
     apiProvider: 'none',
@@ -773,9 +787,11 @@ export function clearDashboardData(state, defaultSprints) {
     theme: state.theme || base.theme,
     projectProfile: state.projectProfile || base.projectProfile,
     projectContext: state.projectContext || deriveProjectContextFromProfile(state.projectProfile || base.projectProfile),
+    geminiKey: state.geminiKey || '',
+    groqKey: state.groqKey || '',
     openrouterKey: state.openrouterKey || '',
     jiraBase: state.jiraBase || '',
-    apiProvider: state.openrouterKey ? 'openrouter' : 'none',
+    apiProvider: state.geminiKey ? 'gemini' : state.groqKey ? 'groq' : state.openrouterKey ? 'openrouter' : 'none',
     connectionTipDismissed: state.connectionTipDismissed || false,
     projectSetupAppliedAt: state.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(state.projectSetupNotes) ? state.projectSetupNotes : [],

@@ -26,11 +26,10 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.queryByText(/Start here/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/What this product does and how to use it/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/^Gemma 4 31B$/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/^Llama 3\.3 70B$/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/^Qwen 3 Coder$/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/^Free Router$/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/OpenRouter ready/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Gemini 2\.5 Flash$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Groq Llama 3\.3 70B$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^OpenRouter Free Router$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/AI ready/i)).not.toBeInTheDocument();
   expect(screen.getByText(/^Shared sync$/i)).toBeInTheDocument();
   expect(screen.getByText(/^Local only$/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Dark$/i })).toBeInTheDocument();
@@ -1624,7 +1623,7 @@ test('sprint review keeps Hedy intelligence separate from deck-prep slides', asy
   expect(screen.queryByText(/Old slide bullet that should no longer appear/i)).not.toBeInTheDocument();
 });
 
-test('clear data preserves the saved OpenRouter key and jira base', async () => {
+test('clear data preserves saved AI keys and jira base', async () => {
   const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
   window.localStorage.setItem(
@@ -1662,9 +1661,11 @@ test('clear data preserves the saved OpenRouter key and jira base', async () => 
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
+      geminiKey: 'gemini_test_key',
+      groqKey: 'gsk_test_key',
       openrouterKey: 'sk-or_test_key',
       jiraBase: 'https://example.atlassian.net/browse',
-      apiProvider: 'openrouter',
+      apiProvider: 'gemini',
       connectionTipDismissed: true,
       lastUpdated: '07/04/2026 10:00',
       velocityData: { summary: 'Old summary' },
@@ -1676,6 +1677,8 @@ test('clear data preserves the saved OpenRouter key and jira base', async () => 
   await userEvent.click(screen.getByRole('button', { name: /Clear data/i }));
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
+  expect(saved.geminiKey).toBe('gemini_test_key');
+  expect(saved.groqKey).toBe('gsk_test_key');
   expect(saved.openrouterKey).toBe('sk-or_test_key');
   expect(saved.jiraBase).toBe('https://example.atlassian.net/browse');
   expect(saved.meetingData).toEqual({});

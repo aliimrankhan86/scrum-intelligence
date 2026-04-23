@@ -215,6 +215,139 @@ async function proxyOpenRouterChat(body, requestUrl) {
   }
 }
 
+async function proxyGeminiGenerate(body) {
+  const geminiKey = typeof body?.geminiKey === 'string' ? body.geminiKey.trim() : '';
+  const model = typeof body?.model === 'string' ? body.model.trim() : '';
+  const systemPrompt = typeof body?.systemPrompt === 'string' ? body.systemPrompt : '';
+  const userContent = typeof body?.userContent === 'string' ? body.userContent : '';
+
+  if (!geminiKey) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include geminiKey.' } },
+    };
+  }
+
+  if (!model) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include model.' } },
+    };
+  }
+
+  if (!systemPrompt || !userContent) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include systemPrompt and userContent.' } },
+    };
+  }
+
+  try {
+    const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': geminiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemPrompt }],
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userContent }],
+          },
+        ],
+        generationConfig: {
+          temperature: body?.temperature,
+          maxOutputTokens: body?.maxOutputTokens,
+          responseMimeType: body?.responseMimeType,
+        },
+      }),
+    });
+
+    const text = await upstream.text();
+    let payload;
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { error: { message: text || 'Gemini returned a non-JSON response.' } };
+    }
+
+    return {
+      status: upstream.status,
+      payload,
+    };
+  } catch (error) {
+    return {
+      status: 502,
+      payload: { error: { message: error?.message || 'Gemini proxy request failed.' } },
+    };
+  }
+}
+
+async function proxyGroqChat(body) {
+  const groqKey = typeof body?.groqKey === 'string' ? body.groqKey.trim() : '';
+  const model = typeof body?.model === 'string' ? body.model.trim() : '';
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+
+  if (!groqKey) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include groqKey.' } },
+    };
+  }
+
+  if (!model) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include model.' } },
+    };
+  }
+
+  if (!messages.length) {
+    return {
+      status: 400,
+      payload: { error: { message: 'Request body must include messages.' } },
+    };
+  }
+
+  try {
+    const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${groqKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: body?.temperature,
+        max_completion_tokens: body?.max_completion_tokens,
+      }),
+    });
+
+    const text = await upstream.text();
+    let payload;
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { error: { message: text || 'Groq returned a non-JSON response.' } };
+    }
+
+    return {
+      status: upstream.status,
+      payload,
+    };
+  } catch (error) {
+    return {
+      status: 502,
+      payload: { error: { message: error?.message || 'Groq proxy request failed.' } },
+    };
+  }
+}
+
 function serveStaticAsset(req, res, pathname) {
   if (!fs.existsSync(BUILD_DIR)) {
     jsonResponse(res, 404, { error: 'Shared sync server is running, but no build output was found.' });
@@ -329,6 +462,38 @@ const server = http.createServer(async (req, res) => {
       jsonResponse(res, proxied.status, proxied.payload);
     } catch (error) {
       jsonResponse(res, 400, { error: { message: error.message || 'Could not proxy the OpenRouter request.' } });
+    }
+    return;
+  }
+
+  if (pathname === '/api/gemini/generate') {
+    if (req.method !== 'POST') {
+      jsonResponse(res, 405, { error: 'Method not allowed.' });
+      return;
+    }
+
+    try {
+      const body = await readJsonBody(req);
+      const proxied = await proxyGeminiGenerate(body);
+      jsonResponse(res, proxied.status, proxied.payload);
+    } catch (error) {
+      jsonResponse(res, 400, { error: { message: error.message || 'Could not proxy the Gemini request.' } });
+    }
+    return;
+  }
+
+  if (pathname === '/api/groq/chat') {
+    if (req.method !== 'POST') {
+      jsonResponse(res, 405, { error: 'Method not allowed.' });
+      return;
+    }
+
+    try {
+      const body = await readJsonBody(req);
+      const proxied = await proxyGroqChat(body);
+      jsonResponse(res, proxied.status, proxied.payload);
+    } catch (error) {
+      jsonResponse(res, 400, { error: { message: error.message || 'Could not proxy the Groq request.' } });
     }
     return;
   }
