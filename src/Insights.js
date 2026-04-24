@@ -168,7 +168,14 @@ function Trend({ sprints, field }) {
   );
 }
 
-export default function Insights({ state, persist, onAIStatusChange }) {
+function formatLocalResolutionTimestamp(date = new Date()) {
+  return `${date.toLocaleDateString('en-GB')} ${date.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
+}
+
+export default function Insights({ state, persist, persistLocal, onAIStatusChange }) {
   const [paste, setPaste] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
@@ -217,7 +224,7 @@ export default function Insights({ state, persist, onAIStatusChange }) {
   const process = async () => {
     if (!paste.trim()) { setStatus('Paste Rovo response above first'); return; }
     const directJsonPayload = tryParseDirectInsightsPayload(paste);
-    if (!directJsonPayload && !hasDashboardAIKey(state)) { setStatus('Paste a valid Rovo JSON response or add a Gemini/Groq API key for AI parsing.'); return; }
+    if (!directJsonPayload && !hasDashboardAIKey(state)) { setStatus('Paste a valid Rovo JSON response or add a Groq, Cohere, or Gemini API key for AI parsing.'); return; }
     setLoading(true);
     setStatus(directJsonPayload ? 'Valid Rovo JSON detected. Applying directly...' : 'Processing...');
     try {
@@ -251,6 +258,10 @@ export default function Insights({ state, persist, onAIStatusChange }) {
         projectContext: nextContext,
         velocityData: parsed,
         lastUpdated: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}),
+      });
+      persistLocal?.({
+        lastAIResolutionLabel: directJsonPayload ? 'Direct JSON' : AI_MODEL_META[resolvedModelKey]?.label || 'AI parser',
+        lastAIResolutionAt: formatLocalResolutionTimestamp(),
       });
       setPaste('');
       const providerLabel = directJsonPayload

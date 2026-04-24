@@ -16,13 +16,16 @@ test('splits shared dashboard data from local settings and recomposes them safel
   const fullState = {
     ...defaultState(DEFAULT_SPRINTS),
     theme: 'dark',
+    cohereKey: 'cohere-secret',
     geminiKey: 'gemini-secret',
     groqKey: 'groq-secret',
     openrouterKey: 'sk-or-secret',
     jiraBase: 'https://jira.example.com/browse',
-    apiProvider: 'gemini',
+    apiProvider: 'groq',
     connectionTipDismissed: true,
     lastUpdated: '10/04/2026 15:38',
+    lastAIResolutionLabel: 'Groq Llama 3.3 70B',
+    lastAIResolutionAt: '24/04/2026 09:30',
     savedAt: 1234,
     remoteRevision: 9,
     remoteSavedAt: 1234,
@@ -40,22 +43,29 @@ test('splits shared dashboard data from local settings and recomposes them safel
 
   expect(localSettings).toEqual({
     theme: 'dark',
+    cohereKey: 'cohere-secret',
     geminiKey: 'gemini-secret',
     groqKey: 'groq-secret',
     openrouterKey: 'sk-or-secret',
     jiraBase: 'https://jira.example.com/browse',
-    apiProvider: 'gemini',
+    apiProvider: 'groq',
     connectionTipDismissed: true,
+    lastAIResolutionLabel: 'Groq Llama 3.3 70B',
+    lastAIResolutionAt: '24/04/2026 09:30',
   });
   expect(sharedState.theme).toBeUndefined();
+  expect(sharedState.cohereKey).toBeUndefined();
   expect(sharedState.geminiKey).toBeUndefined();
   expect(sharedState.groqKey).toBeUndefined();
   expect(sharedState.openrouterKey).toBeUndefined();
   expect(sharedState.remoteRevision).toBeUndefined();
   expect(recomposed.theme).toBe('dark');
+  expect(recomposed.cohereKey).toBe('cohere-secret');
   expect(recomposed.geminiKey).toBe('gemini-secret');
   expect(recomposed.groqKey).toBe('groq-secret');
   expect(recomposed.openrouterKey).toBe('sk-or-secret');
+  expect(recomposed.lastAIResolutionLabel).toBe('Groq Llama 3.3 70B');
+  expect(recomposed.lastAIResolutionAt).toBe('24/04/2026 09:30');
   expect(recomposed.lastUpdated).toBe('10/04/2026 15:38');
   expect(recomposed.meetingData['4_standup'].summary).toBe('Shared standup snapshot');
 });

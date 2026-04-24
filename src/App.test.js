@@ -26,8 +26,9 @@ test('renders the scrum-intelligence dashboard shell', () => {
   expect(screen.queryByText(/Start here/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/What this product does and how to use it/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/Copy setup prompt/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/^Gemini 2\.5 Flash$/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/^Groq Llama 3\.3 70B$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Cohere Command R7B$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Gemini 2\.5 Flash$/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/^OpenRouter Free Router$/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/AI ready/i)).not.toBeInTheDocument();
   expect(screen.getByText(/^Shared sync$/i)).toBeInTheDocument();
@@ -46,6 +47,21 @@ test('project setup is a dedicated page with instructions and the setup prompt',
   expect(screen.getByText(/Project setup prompt/i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Copy setup prompt$/i })).toBeInTheDocument();
   expect(screen.getByPlaceholderText(/Paste the project setup response here/i)).toBeInTheDocument();
+});
+
+test('shows which model last resolved an AI-assisted update in the capture card', () => {
+  window.localStorage.setItem(
+    STORE_KEY,
+    JSON.stringify({
+      ...defaultState(DEFAULT_SPRINTS),
+      lastAIResolutionLabel: 'Groq Llama 3.3 70B',
+      lastAIResolutionAt: '24/04/2026 09:30',
+    }),
+  );
+
+  render(<App />);
+
+  expect(screen.getByText(/Resolved by Groq Llama 3\.3 70B/i)).toBeInTheDocument();
 });
 
 test('project setup applies valid setup JSON directly without requiring an API key', async () => {
@@ -1623,7 +1639,7 @@ test('sprint review keeps Hedy intelligence separate from deck-prep slides', asy
   expect(screen.queryByText(/Old slide bullet that should no longer appear/i)).not.toBeInTheDocument();
 });
 
-test('clear data preserves saved AI keys and jira base', async () => {
+test('clear data preserves saved AI keys, jira base, and last resolver hint', async () => {
   const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
   window.localStorage.setItem(
@@ -1661,13 +1677,16 @@ test('clear data preserves saved AI keys and jira base', async () => {
         epic: 'RPAB-27',
         epicName: 'UK Prospect Data Cleansing Automation',
       },
+      cohereKey: 'cohere_test_key',
       geminiKey: 'gemini_test_key',
       groqKey: 'gsk_test_key',
       openrouterKey: 'sk-or_test_key',
       jiraBase: 'https://example.atlassian.net/browse',
-      apiProvider: 'gemini',
+      apiProvider: 'groq',
       connectionTipDismissed: true,
       lastUpdated: '07/04/2026 10:00',
+      lastAIResolutionLabel: 'Groq Llama 3.3 70B',
+      lastAIResolutionAt: '24/04/2026 09:30',
       velocityData: { summary: 'Old summary' },
     }),
   );
@@ -1677,10 +1696,13 @@ test('clear data preserves saved AI keys and jira base', async () => {
   await userEvent.click(screen.getByRole('button', { name: /Clear data/i }));
 
   const saved = JSON.parse(window.localStorage.getItem('scrum_intelligence_v8'));
+  expect(saved.cohereKey).toBe('cohere_test_key');
   expect(saved.geminiKey).toBe('gemini_test_key');
   expect(saved.groqKey).toBe('gsk_test_key');
   expect(saved.openrouterKey).toBe('sk-or_test_key');
   expect(saved.jiraBase).toBe('https://example.atlassian.net/browse');
+  expect(saved.lastAIResolutionLabel).toBe('Groq Llama 3.3 70B');
+  expect(saved.lastAIResolutionAt).toBe('24/04/2026 09:30');
   expect(saved.meetingData).toEqual({});
   expect(saved.sprintSummaries).toEqual({});
   expect(saved.velocityData).toBeUndefined();

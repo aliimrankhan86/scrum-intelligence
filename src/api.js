@@ -1,4 +1,4 @@
-// ─── AI Routing: Gemini primary, Groq fallback, optional OpenRouter fallback ──
+// ─── AI Routing: Groq primary, Cohere fallback, Gemini tertiary ──────────────
 
 import {
   AI_MODEL_CHAIN,
@@ -15,6 +15,9 @@ export const GEMINI_PROXY_ENDPOINT = configuredOrigin
 export const GROQ_PROXY_ENDPOINT = configuredOrigin
   ? `${configuredOrigin}/api/groq/chat`
   : '/api/groq/chat';
+export const COHERE_PROXY_ENDPOINT = configuredOrigin
+  ? `${configuredOrigin}/api/cohere/chat`
+  : '/api/cohere/chat';
 export const OPENROUTER_PROXY_ENDPOINT = configuredOrigin
   ? `${configuredOrigin}/api/openrouter/chat`
   : '/api/openrouter/chat';
@@ -62,6 +65,35 @@ function wait(ms) {
   });
 }
 
+async function readJsonPayload(res, providerLabel) {
+  if (typeof res?.text === 'function') {
+    const text = await res.text();
+    if (!text) return {};
+
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      const contentType = res.headers?.get?.('content-type') || '';
+      const looksLikeHtml = /text\/html/i.test(contentType) || /^\s*</.test(text);
+      const requestError = new Error(
+        looksLikeHtml
+          ? `${providerLabel} returned HTML instead of JSON. Restart the shared server so the latest /api routes are loaded.`
+          : `${providerLabel} returned a non-JSON response.`,
+      );
+      requestError.status = res.status || 200;
+      throw requestError;
+    }
+  }
+
+  if (typeof res?.json === 'function') {
+    return res.json();
+  }
+
+  const requestError = new Error(`${providerLabel} returned an unreadable response.`);
+  requestError.status = res?.status || 200;
+  throw requestError;
+}
+
 export async function callAI(systemPrompt, userContent, keys, onStatusChange, options = {}) {
   const maxCompletionTokens = Number.isFinite(Number(options?.openrouterMaxTokens))
     ? Number(options.openrouterMaxTokens)
@@ -75,7 +107,7 @@ export async function callAI(systemPrompt, userContent, keys, onStatusChange, op
   const configuredModels = getConfiguredAIModels(keys);
 
   if (!configuredModels.length) {
-    throw new Error('No Gemini or Groq API key configured — click ⚙ API keys');
+    throw new Error('No Groq, Cohere, or Gemini API key configured — click ⚙ API keys');
   }
 
   const errors = [];
@@ -265,6 +297,16 @@ async function requestAIModel({ keys, model, systemPrompt, userContent, maxCompl
     });
   }
 
+  if (model.provider === 'cohere') {
+    return requestCohereChat({
+      cohereKey: keys.cohereKey,
+      modelId: model.id,
+      systemPrompt,
+      userContent,
+      maxCompletionTokens,
+    });
+  }
+
   return requestOpenRouterChat({
     openrouterKey: keys.openrouterKey,
     modelId: model.id,
@@ -307,7 +349,7 @@ async function requestGeminiGenerate({ geminiKey, modelId, systemPrompt, userCon
     throw requestError;
   }
 
-  const data = await res.json();
+  const data = await readJsonPayload(res, 'Gemini');
   const candidate = data.candidates?.[0] || {};
   const finishReason = candidate.finishReason || data.finishReason || '';
   const content = (candidate.content?.parts || [])
@@ -334,6 +376,58 @@ async function requestGroqChat({ groqKey, modelId, systemPrompt, userContent, ma
     maxCompletionTokens,
     includeResponseFormat: false,
   });
+}
+
+async function requestCohereChat({ cohereKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
+  let res;
+  try {
+    res = await fetch(COHERE_PROXY_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        cohereKey,
+        model: modelId,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        temperature: 0.1,
+        max_tokens: maxCompletionTokens,
+      }),
+    });
+  } catch (_) {
+    const requestError = new Error('The local Cohere proxy did not respond. Ensure the shared server is running and reachable.');
+    requestError.status = 0;
+    throw requestError;
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail =
+      err?.error?.message ||
+      err?.message ||
+      (Array.isArray(err?.errors) ? err.errors.join(', ') : '') ||
+      res.statusText;
+    const requestError = new Error(`Cohere ${res.status}: ${detail}`);
+    requestError.status = res.status;
+    throw requestError;
+  }
+
+  const data = await readJsonPayload(res, 'Cohere');
+  const finishReason = data.finish_reason || '';
+  const content = (data.message?.content || [])
+    .map((part) => part?.text || '')
+    .join('')
+    .trim();
+  if (finishReason === 'MAX_TOKENS') {
+    const requestError = new Error(`Cohere responded, but the JSON was truncated for ${modelId} (finish_reason=MAX_TOKENS).`);
+    requestError.status = 200;
+    throw requestError;
+  }
+  return content;
 }
 
 async function requestOpenRouterChat({ openrouterKey, modelId, systemPrompt, userContent, maxCompletionTokens }) {
@@ -399,7 +493,7 @@ async function requestOpenAICompatibleChat({
     throw requestError;
   }
 
-  const data = await res.json();
+  const data = await readJsonPayload(res, providerLabel);
   const finishReason = data.choices?.[0]?.finish_reason || data.finish_reason || '';
   const content = data.choices?.[0]?.message?.content || '';
   if (finishReason === 'length') {

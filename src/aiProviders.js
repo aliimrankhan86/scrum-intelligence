@@ -7,6 +7,23 @@ export const AI_ROUTER_PROVIDER = {
 
 export const AI_MODEL_CHAIN = [
   {
+    key: 'groq',
+    provider: 'groq',
+    keyField: 'groqKey',
+    id: 'llama-3.3-70b-versatile',
+    label: 'Groq Llama 3.3 70B',
+    accent: '#34d399',
+  },
+  {
+    key: 'cohere',
+    provider: 'cohere',
+    keyField: 'cohereKey',
+    id: 'command-r7b-12-2024',
+    label: 'Cohere Command R7B',
+    accent: '#f59e0b',
+    endpoint: 'https://api.cohere.com/v2/chat',
+  },
+  {
     key: 'gemini',
     provider: 'gemini',
     keyField: 'geminiKey',
@@ -14,14 +31,6 @@ export const AI_MODEL_CHAIN = [
     label: 'Gemini 2.5 Flash',
     accent: '#60a5fa',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-  },
-  {
-    key: 'groq',
-    provider: 'groq',
-    keyField: 'groqKey',
-    id: 'llama-3.3-70b-versatile',
-    label: 'Groq Llama 3.3 70B',
-    accent: '#34d399',
   },
   {
     key: 'openrouter',

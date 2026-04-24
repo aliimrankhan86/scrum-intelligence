@@ -1156,6 +1156,13 @@ function formatSyncTimestamp(value) {
   });
 }
 
+function formatLocalResolutionTimestamp(date = new Date()) {
+  return `${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+}
+
 function initialSharedSyncStatus() {
   if (process.env.NODE_ENV === "test") {
     return {
@@ -4380,6 +4387,13 @@ export default function App() {
     });
   }, []);
 
+  const rememberAIResolution = useCallback((label) => {
+    persistLocal({
+      lastAIResolutionLabel: label,
+      lastAIResolutionAt: formatLocalResolutionTimestamp(),
+    });
+  }, [persistLocal]);
+
   const persist = useCallback((patchOrUpdater) => {
     if (sharedSyncEnabledRef.current && sharedSyncStatus.mode === "offline") {
       showToast("Shared sync is offline. Dashboard changes are blocked until the shared store reconnects.", true);
@@ -4498,6 +4512,7 @@ export default function App() {
 
   useEffect(() => {
     const keys = {
+      cohereKey: state.cohereKey,
       geminiKey: state.geminiKey,
       groqKey: state.groqKey,
       openrouterKey: state.openrouterKey,
@@ -4508,7 +4523,7 @@ export default function App() {
         syncProviderStatus(prev[model.key], model, keys),
       ]),
     ));
-  }, [state.geminiKey, state.groqKey, state.openrouterKey]);
+  }, [state.cohereKey, state.geminiKey, state.groqKey, state.openrouterKey]);
 
   useEffect(() => {
     const handleStorage = (event) => {
@@ -4853,6 +4868,7 @@ export default function App() {
 
   const runProviderTest = useCallback(async () => {
     const keys = {
+      cohereKey: document.getElementById("cohere-key")?.value.trim() || "",
       geminiKey: document.getElementById("gemini-key")?.value.trim() || "",
       groqKey: document.getElementById("groq-key")?.value.trim() || "",
       openrouterKey: document.getElementById("openrouter-key")?.value.trim() || "",
@@ -4860,7 +4876,7 @@ export default function App() {
     if (!hasDashboardAIKey(keys)) {
       setProviderTestState({
         loading: false,
-        msg: "Add a Gemini or Groq API key before testing.",
+        msg: "Add a Groq, Cohere, or Gemini API key before testing.",
         err: true,
       });
       return;
@@ -5016,6 +5032,11 @@ export default function App() {
         : AI_MODEL_META[resolvedModelKey]
           ? `Setup applied with ${AI_MODEL_META[resolvedModelKey].label}`
             : "Project setup applied";
+      rememberAIResolution(
+        resolvedModelKey === "json"
+          ? "Direct JSON"
+          : AI_MODEL_META[resolvedModelKey]?.label || "AI parser",
+      );
       const success = projectChanged
         ? `${providerLabel} · Switched to ${incomingProfile.projectKey || incomingProfile.projectName} · ${seededSummary}`
         : `${providerLabel} · ${seededSummary}`;
@@ -5027,7 +5048,7 @@ export default function App() {
       showToast(e.message, true);
     }
     setSetupLoading(false);
-  }, [persist, persistLocal, projectProfile, setupPaste, showToast, state]);
+  }, [persist, persistLocal, projectProfile, rememberAIResolution, setupPaste, showToast, state]);
 
   const applyParsed = useCallback(
     (parsed, source) => {
@@ -5247,6 +5268,11 @@ export default function App() {
             : AI_MODEL_META[resolvedModelKey]
             ? `Updated with ${AI_MODEL_META[resolvedModelKey].label}`
             : "Dashboard updated";
+        rememberAIResolution(
+          directJsonPayload
+            ? "Direct JSON"
+            : AI_MODEL_META[resolvedModelKey]?.label || "AI parser",
+        );
         const successMessage = summary
           ? `${providerLabel} · ${summary}`
           : providerLabel;
@@ -5259,7 +5285,7 @@ export default function App() {
       }
       setLoad(false);
     },
-    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persistLocal, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, recentSprintHistoryForAI, showToast, curMeeting],
+    [rovoPaste, notesPaste, state, meeting, activeSprint, nextSprint, persistLocal, rememberAIResolution, applyParsed, projectContext.epic, projectContext.epicName, projectProfile, recentSprintHistoryForAI, showToast, curMeeting],
   );
 
   const switchMeeting = (id) => {
@@ -5364,9 +5390,11 @@ export default function App() {
     ? "#f6f8fc"
     : "rgba(10,14,20,0.72)";
   const pageEyebrow = isSetup ? "Setup page" : isInsights ? "Performance view" : "Sprint workspace";
-  const statusCardHint = state.lastUpdated
-    ? `Updated ${state.lastUpdated}`
-    : "No updates captured yet";
+  const statusCardHint = state.lastAIResolutionLabel
+    ? `Resolved by ${state.lastAIResolutionLabel}${state.lastAIResolutionAt ? ` · ${state.lastAIResolutionAt}` : ""}`
+    : state.lastUpdated
+      ? `Updated ${state.lastUpdated}`
+      : "No updates captured yet";
 
   return (
     <div
@@ -5808,6 +5836,7 @@ export default function App() {
               <Insights
                 state={state}
                 persist={persist}
+                persistLocal={persistLocal}
                 onAIStatusChange={(providers) => {
                   if (providers) setAIStatus((prev) => ({ ...prev, ...providers }));
                 }}
@@ -5968,26 +5997,34 @@ export default function App() {
           </div>
           {[
             [
-              "gemini-key",
-              "Google Gemini API key",
-              "AIza...",
-              "Primary AI route for setup parsing and Hedy / meeting-note parsing. Uses Gemini 2.5 Flash through the local sync server proxy.",
-              state.geminiKey || "",
-              "password",
-            ],
-            [
               "groq-key",
               "Groq API key",
               "gsk_...",
-              "Fallback AI route. Uses Groq's OpenAI-compatible chat API with Llama 3.3 70B.",
+              "Primary AI route. Uses Groq's OpenAI-compatible chat API with Llama 3.3 70B.",
               state.groqKey || "",
+              "password",
+            ],
+            [
+              "cohere-key",
+              "Cohere API key",
+              "co_...",
+              "Second AI route. Uses Cohere Chat v2 with Command R7B.",
+              state.cohereKey || "",
+              "password",
+            ],
+            [
+              "gemini-key",
+              "Google Gemini API key",
+              "AIza...",
+              "Third AI route. Uses Gemini 2.5 Flash through the local sync server proxy.",
+              state.geminiKey || "",
               "password",
             ],
             [
               "openrouter-key",
               "OpenRouter API key (optional fallback)",
               "sk-or-...",
-              "Optional legacy fallback only. Leave blank if you want Gemini and Groq to be the only AI routes.",
+              "Optional legacy fallback only. Leave blank if you want Groq, Cohere, and Gemini to be the active queue.",
               state.openrouterKey || "",
               "password",
             ],
@@ -6067,6 +6104,7 @@ export default function App() {
               }}
               onClick={() => {
                 const keys = {
+                  cohereKey: document.getElementById("cohere-key").value.trim(),
                   geminiKey: document.getElementById("gemini-key").value.trim(),
                   groqKey: document.getElementById("groq-key").value.trim(),
                   openrouterKey: document.getElementById("openrouter-key").value.trim(),

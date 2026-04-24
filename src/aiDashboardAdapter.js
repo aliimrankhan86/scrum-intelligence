@@ -10,9 +10,9 @@ export function getDashboardCaptureSource(tool) {
 
 export function getDashboardAIUnavailableMessage(tool) {
   if (tool === "rovo") {
-    return "Paste a valid Rovo JSON response or add a Gemini/Groq API key for AI parsing.";
+    return "Paste a valid Rovo JSON response or add a Groq, Cohere, or Gemini API key for AI parsing.";
   }
-  return "Paste dashboard-ready Hedy JSON, or add a Gemini/Groq API key for free-form Hedy/meeting-note parsing.";
+  return "Paste dashboard-ready Hedy JSON, or add a Groq, Cohere, or Gemini API key for free-form Hedy/meeting-note parsing.";
 }
 
 export function getDirectDashboardJsonStatus(tool) {
@@ -90,6 +90,7 @@ export async function parseDashboardCaptureWithAI({
 
 export function getDashboardAIKeys(source = {}) {
   return {
+    cohereKey: source.cohereKey || "",
     geminiKey: source.geminiKey || "",
     groqKey: source.groqKey || "",
     openrouterKey: source.openrouterKey || "",

@@ -593,21 +593,26 @@ export function hydrateState(rawState, defaultSprints) {
       ...defaultProjectContext,
       ...(rawState.projectContext || {}),
     },
+    cohereKey: rawState.cohereKey || '',
     geminiKey: rawState.geminiKey || '',
     groqKey: rawState.groqKey || '',
     openrouterKey: rawState.openrouterKey || '',
     jiraBase: rawState.jiraBase || '',
-    apiProvider: rawState.geminiKey
-      ? 'gemini'
-      : rawState.groqKey
-        ? 'groq'
-        : rawState.openrouterKey || rawState.apiProvider === 'openrouter'
-          ? 'openrouter'
-          : 'none',
+    apiProvider: rawState.groqKey
+      ? 'groq'
+      : rawState.cohereKey
+        ? 'cohere'
+        : rawState.geminiKey
+          ? 'gemini'
+          : rawState.openrouterKey || rawState.apiProvider === 'openrouter'
+            ? 'openrouter'
+            : 'none',
     connectionTipDismissed: Boolean(rawState.connectionTipDismissed),
     projectSetupAppliedAt: rawState.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(rawState.projectSetupNotes) ? rawState.projectSetupNotes : base.projectSetupNotes,
     lastUpdated: rawState.lastUpdated || null,
+    lastAIResolutionLabel: rawState.lastAIResolutionLabel || '',
+    lastAIResolutionAt: rawState.lastAIResolutionAt || null,
     velocityData: rawState.velocityData,
     savedAt: Number.isFinite(Number(rawState.savedAt)) ? Number(rawState.savedAt) : null,
     remoteRevision: Number.isFinite(Number(rawState.remoteRevision)) ? Number(rawState.remoteRevision) : 0,
@@ -620,12 +625,15 @@ export function extractLocalSettings(rawState, defaultSprints) {
   const state = hydrateState(rawState, defaultSprints);
   return {
     theme: state.theme,
+    cohereKey: state.cohereKey,
     geminiKey: state.geminiKey,
     groqKey: state.groqKey,
     openrouterKey: state.openrouterKey,
     jiraBase: state.jiraBase,
     apiProvider: state.apiProvider,
     connectionTipDismissed: state.connectionTipDismissed,
+    lastAIResolutionLabel: state.lastAIResolutionLabel,
+    lastAIResolutionAt: state.lastAIResolutionAt,
   };
 }
 
@@ -633,12 +641,15 @@ export function extractSharedDashboardState(rawState, defaultSprints) {
   const state = hydrateState(rawState, defaultSprints);
   const {
     theme,
+    cohereKey,
     geminiKey,
     groqKey,
     openrouterKey,
     jiraBase,
     apiProvider,
     connectionTipDismissed,
+    lastAIResolutionLabel,
+    lastAIResolutionAt,
     remoteRevision,
     remoteUpdatedAt,
     remoteSavedAt,
@@ -762,6 +773,7 @@ export function defaultState(defaultSprints) {
     theme: 'light',
     projectProfile,
     projectContext,
+    cohereKey: '',
     geminiKey: '',
     groqKey: '',
     openrouterKey: '',
@@ -771,6 +783,8 @@ export function defaultState(defaultSprints) {
     projectSetupAppliedAt: null,
     projectSetupNotes: [],
     lastUpdated: null,
+    lastAIResolutionLabel: '',
+    lastAIResolutionAt: null,
     savedAt: null,
     remoteRevision: 0,
     remoteUpdatedAt: null,
@@ -787,14 +801,17 @@ export function clearDashboardData(state, defaultSprints) {
     theme: state.theme || base.theme,
     projectProfile: state.projectProfile || base.projectProfile,
     projectContext: state.projectContext || deriveProjectContextFromProfile(state.projectProfile || base.projectProfile),
+    cohereKey: state.cohereKey || '',
     geminiKey: state.geminiKey || '',
     groqKey: state.groqKey || '',
     openrouterKey: state.openrouterKey || '',
     jiraBase: state.jiraBase || '',
-    apiProvider: state.geminiKey ? 'gemini' : state.groqKey ? 'groq' : state.openrouterKey ? 'openrouter' : 'none',
+    apiProvider: state.groqKey ? 'groq' : state.cohereKey ? 'cohere' : state.geminiKey ? 'gemini' : state.openrouterKey ? 'openrouter' : 'none',
     connectionTipDismissed: state.connectionTipDismissed || false,
     projectSetupAppliedAt: state.projectSetupAppliedAt || null,
     projectSetupNotes: Array.isArray(state.projectSetupNotes) ? state.projectSetupNotes : [],
+    lastAIResolutionLabel: state.lastAIResolutionLabel || '',
+    lastAIResolutionAt: state.lastAIResolutionAt || null,
     remoteRevision: Number.isFinite(Number(state.remoteRevision)) ? Number(state.remoteRevision) : 0,
     remoteUpdatedAt: Number.isFinite(Number(state.remoteUpdatedAt)) ? Number(state.remoteUpdatedAt) : null,
     remoteSavedAt: Number.isFinite(Number(state.remoteSavedAt)) ? Number(state.remoteSavedAt) : null,
